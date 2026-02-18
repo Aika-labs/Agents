@@ -10,7 +10,6 @@
     },
     "dependencies": {
         "@pulumi/gcp": "^9.0.0",
-        "@pulumi/kubernetes": "^4.25.0",
         "@pulumi/pulumi": "^3.113.0"
     },
     "scripts": {
