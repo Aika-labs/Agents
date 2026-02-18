@@ -4,9 +4,11 @@ import { z } from "zod";
 import { getSupabase } from "../lib/supabase.js";
 import { parseBody, parseQuery } from "../lib/validate.js";
 import { writeAuditLog } from "../lib/audit.js";
+import { strictRateLimiter } from "../middleware/rate-limit.js";
 import type { AgentStatus } from "../types/database.js";
+import type { AppEnv } from "../types/env.js";
 
-export const agentRoutes = new Hono();
+export const agentRoutes = new Hono<AppEnv>();
 
 // -- Zod schemas --------------------------------------------------------------
 
@@ -29,7 +31,6 @@ const agentStatuses = [
 ] as const;
 
 const createAgentSchema = z.object({
-  owner_id: z.string().uuid(),
   name: z.string().min(1).max(255),
   description: z.string().max(2000).optional(),
   framework: z.enum(agentFrameworks).default("google_adk"),
@@ -57,7 +58,6 @@ const updateAgentSchema = z.object({
 });
 
 const listAgentsQuery = z.object({
-  owner_id: z.string().uuid().optional(),
   status: z.enum(agentStatuses).optional(),
   framework: z.enum(agentFrameworks).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -77,14 +77,15 @@ const validTransitions: Record<AgentStatus, AgentStatus[]> = {
 
 // -- Routes -------------------------------------------------------------------
 
-/** POST / -- Create a new agent. */
+/** POST / -- Create a new agent. Owner is the authenticated user. */
 agentRoutes.post("/", async (c) => {
+  const user = c.get("user");
   const body = parseBody(createAgentSchema, await c.req.json());
   const db = getSupabase();
 
   const { data, error } = await db
     .from("agents")
-    .insert({ ...body, status: "draft" as const, version: 1 })
+    .insert({ ...body, owner_id: user.id, status: "draft" as const, version: 1 })
     .select()
     .single();
 
@@ -92,31 +93,34 @@ agentRoutes.post("/", async (c) => {
     throw new HTTPException(500, { message: error.message });
   }
 
-  await writeAuditLog({
-    actorId: body.owner_id,
-    action: "agent.created",
-    resourceType: "agent",
-    resourceId: data.id,
-    agentId: data.id,
-    evidence: { name: body.name, framework: body.framework },
-  });
+  await writeAuditLog(
+    {
+      action: "agent.created",
+      resourceType: "agent",
+      resourceId: data.id,
+      agentId: data.id,
+      evidence: { name: body.name, framework: body.framework },
+    },
+    c,
+  );
 
   return c.json(data, 201);
 });
 
-/** GET / -- List agents with optional filters. */
+/** GET / -- List agents owned by the authenticated user. */
 agentRoutes.get("/", async (c) => {
+  const user = c.get("user");
   const query = parseQuery(listAgentsQuery, c.req.query());
   const db = getSupabase();
 
   let q = db
     .from("agents")
     .select("*", { count: "exact" })
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .range(query.offset, query.offset + query.limit - 1);
 
-  if (query.owner_id) q = q.eq("owner_id", query.owner_id);
   if (query.status) q = q.eq("status", query.status);
   if (query.framework) q = q.eq("framework", query.framework);
 
@@ -129,8 +133,9 @@ agentRoutes.get("/", async (c) => {
   return c.json({ data, total: count, limit: query.limit, offset: query.offset });
 });
 
-/** GET /:id -- Get a single agent by ID. */
+/** GET /:id -- Get a single agent by ID (must be owned by user). */
 agentRoutes.get("/:id", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const db = getSupabase();
 
@@ -138,6 +143,7 @@ agentRoutes.get("/:id", async (c) => {
     .from("agents")
     .select()
     .eq("id", id)
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .single();
 
@@ -150,6 +156,7 @@ agentRoutes.get("/:id", async (c) => {
 
 /** PATCH /:id -- Update an agent. Validates status transitions. */
 agentRoutes.patch("/:id", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const body = parseBody(updateAgentSchema, await c.req.json());
   const db = getSupabase();
@@ -159,6 +166,7 @@ agentRoutes.patch("/:id", async (c) => {
     .from("agents")
     .select()
     .eq("id", id)
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .single();
 
@@ -190,25 +198,28 @@ agentRoutes.patch("/:id", async (c) => {
     throw new HTTPException(500, { message: error.message });
   }
 
-  await writeAuditLog({
-    actorId: current.owner_id,
-    action: body.status ? "agent.status_changed" : "agent.updated",
-    resourceType: "agent",
-    resourceId: id,
-    agentId: id,
-    severity: body.status === "error" ? "warning" : "info",
-    evidence: {
-      before: { status: current.status, version: current.version },
-      after: { status: data.status, version: data.version },
-      changes: Object.keys(body),
+  await writeAuditLog(
+    {
+      action: body.status ? "agent.status_changed" : "agent.updated",
+      resourceType: "agent",
+      resourceId: id,
+      agentId: id,
+      severity: body.status === "error" ? "warning" : "info",
+      evidence: {
+        before: { status: current.status, version: current.version },
+        after: { status: data.status, version: data.version },
+        changes: Object.keys(body),
+      },
     },
-  });
+    c,
+  );
 
   return c.json(data);
 });
 
 /** DELETE /:id -- Soft-delete an agent (sets deleted_at). */
 agentRoutes.delete("/:id", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const db = getSupabase();
 
@@ -216,6 +227,7 @@ agentRoutes.delete("/:id", async (c) => {
     .from("agents")
     .select("id, owner_id, name, status")
     .eq("id", id)
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .single();
 
@@ -232,20 +244,23 @@ agentRoutes.delete("/:id", async (c) => {
     throw new HTTPException(500, { message: error.message });
   }
 
-  await writeAuditLog({
-    actorId: current.owner_id,
-    action: "agent.deleted",
-    resourceType: "agent",
-    resourceId: id,
-    agentId: id,
-    evidence: { name: current.name, previousStatus: current.status },
-  });
+  await writeAuditLog(
+    {
+      action: "agent.deleted",
+      resourceType: "agent",
+      resourceId: id,
+      agentId: id,
+      evidence: { name: current.name, previousStatus: current.status },
+    },
+    c,
+  );
 
   return c.json({ deleted: true });
 });
 
-/** POST /:id/kill -- Emergency kill switch. */
-agentRoutes.post("/:id/kill", async (c) => {
+/** POST /:id/kill -- Emergency kill switch. Strict rate limit. */
+agentRoutes.post("/:id/kill", strictRateLimiter, async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const db = getSupabase();
 
@@ -253,6 +268,7 @@ agentRoutes.post("/:id/kill", async (c) => {
     .from("agents")
     .select()
     .eq("id", id)
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .single();
 
@@ -290,26 +306,29 @@ agentRoutes.post("/:id/kill", async (c) => {
     .update({ is_active: false })
     .eq("agent_id", id);
 
-  await writeAuditLog({
-    actorId: current.owner_id,
-    action: "agent.killed",
-    severity: "critical",
-    resourceType: "agent",
-    resourceId: id,
-    agentId: id,
-    evidence: {
-      previousStatus: current.status,
-      reason: "Emergency kill switch activated",
-      sessionsTerminated: true,
-      walletsDeactivated: true,
+  await writeAuditLog(
+    {
+      action: "agent.killed",
+      severity: "critical",
+      resourceType: "agent",
+      resourceId: id,
+      agentId: id,
+      evidence: {
+        previousStatus: current.status,
+        reason: "Emergency kill switch activated",
+        sessionsTerminated: true,
+        walletsDeactivated: true,
+      },
     },
-  });
+    c,
+  );
 
   return c.json({ killed: true, agent: data });
 });
 
 /** GET /:id/model-config -- Get current model configuration. */
 agentRoutes.get("/:id/model-config", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const db = getSupabase();
 
@@ -317,6 +336,7 @@ agentRoutes.get("/:id/model-config", async (c) => {
     .from("agents")
     .select("id, model_config, version")
     .eq("id", id)
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .single();
 
@@ -327,8 +347,9 @@ agentRoutes.get("/:id/model-config", async (c) => {
   return c.json(data);
 });
 
-/** PUT /:id/model-config -- Hot-swap model configuration. */
-agentRoutes.put("/:id/model-config", async (c) => {
+/** PUT /:id/model-config -- Hot-swap model configuration. Strict rate limit. */
+agentRoutes.put("/:id/model-config", strictRateLimiter, async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const modelConfig = parseBody(z.record(z.unknown()), await c.req.json());
   const db = getSupabase();
@@ -337,6 +358,7 @@ agentRoutes.put("/:id/model-config", async (c) => {
     .from("agents")
     .select("id, owner_id, model_config, version")
     .eq("id", id)
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .single();
 
@@ -355,17 +377,19 @@ agentRoutes.put("/:id/model-config", async (c) => {
     throw new HTTPException(500, { message: error.message });
   }
 
-  await writeAuditLog({
-    actorId: current.owner_id,
-    action: "agent.model_swapped",
-    resourceType: "agent",
-    resourceId: id,
-    agentId: id,
-    evidence: {
-      before: current.model_config,
-      after: modelConfig,
+  await writeAuditLog(
+    {
+      action: "agent.model_swapped",
+      resourceType: "agent",
+      resourceId: id,
+      agentId: id,
+      evidence: {
+        before: current.model_config,
+        after: modelConfig,
+      },
     },
-  });
+    c,
+  );
 
   return c.json(data);
 });

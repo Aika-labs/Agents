@@ -5,15 +5,15 @@ import { getSupabase } from "../lib/supabase.js";
 import { parseBody, parseQuery } from "../lib/validate.js";
 import { writeAuditLog } from "../lib/audit.js";
 import type { FeatureFlagRow } from "../types/database.js";
+import type { AppEnv } from "../types/env.js";
 
-export const featureFlagRoutes = new Hono();
+export const featureFlagRoutes = new Hono<AppEnv>();
 
 // -- Zod schemas --------------------------------------------------------------
 
 const flagScopes = ["platform", "agent", "user"] as const;
 
 const createFlagSchema = z.object({
-  owner_id: z.string().uuid(),
   key: z.string().min(1).max(255).regex(/^[a-z0-9_]+$/, {
     message: "Flag key must be lowercase alphanumeric with underscores only",
   }),
@@ -41,7 +41,6 @@ const updateFlagSchema = z.object({
 });
 
 const listFlagsQuery = z.object({
-  owner_id: z.string().uuid().optional(),
   scope: z.enum(flagScopes).optional(),
   agent_id: z.string().uuid().optional(),
   enabled: z
@@ -54,22 +53,22 @@ const listFlagsQuery = z.object({
 
 const evaluateFlagSchema = z.object({
   key: z.string().min(1),
-  owner_id: z.string().uuid(),
   agent_id: z.string().uuid().optional(),
   context: z.record(z.unknown()).default({}),
 });
 
 // -- Routes -------------------------------------------------------------------
 
-/** POST / -- Create a new feature flag. */
+/** POST / -- Create a new feature flag. Owner is the authenticated user. */
 featureFlagRoutes.post("/", async (c) => {
+  const user = c.get("user");
   const body = parseBody(createFlagSchema, await c.req.json());
   const db = getSupabase();
 
   const { data, error } = await db
     .from("feature_flags")
     .insert({
-      owner_id: body.owner_id,
+      owner_id: user.id,
       key: body.key,
       name: body.name,
       description: body.description ?? null,
@@ -96,30 +95,33 @@ featureFlagRoutes.post("/", async (c) => {
 
   const flag = data as FeatureFlagRow;
 
-  await writeAuditLog({
-    actorId: body.owner_id,
-    action: "flag.created",
-    resourceType: "feature_flag",
-    resourceId: flag.id,
-    agentId: body.agent_id ?? null,
-    evidence: { key: body.key, scope: body.scope, enabled: body.enabled },
-  });
+  await writeAuditLog(
+    {
+      action: "flag.created",
+      resourceType: "feature_flag",
+      resourceId: flag.id,
+      agentId: body.agent_id ?? null,
+      evidence: { key: body.key, scope: body.scope, enabled: body.enabled },
+    },
+    c,
+  );
 
   return c.json(flag, 201);
 });
 
-/** GET / -- List feature flags with optional filters. */
+/** GET / -- List feature flags owned by the authenticated user. */
 featureFlagRoutes.get("/", async (c) => {
+  const user = c.get("user");
   const query = parseQuery(listFlagsQuery, c.req.query());
   const db = getSupabase();
 
   let q = db
     .from("feature_flags")
     .select("*", { count: "exact" })
+    .eq("owner_id", user.id)
     .order("created_at", { ascending: false })
     .range(query.offset, query.offset + query.limit - 1);
 
-  if (query.owner_id) q = q.eq("owner_id", query.owner_id);
   if (query.scope) q = q.eq("scope", query.scope);
   if (query.agent_id) q = q.eq("agent_id", query.agent_id);
   if (query.enabled !== undefined) q = q.eq("enabled", query.enabled);
@@ -138,8 +140,9 @@ featureFlagRoutes.get("/", async (c) => {
   });
 });
 
-/** GET /:id -- Get a single feature flag. */
+/** GET /:id -- Get a single feature flag (must be owned by user). */
 featureFlagRoutes.get("/:id", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const db = getSupabase();
 
@@ -147,6 +150,7 @@ featureFlagRoutes.get("/:id", async (c) => {
     .from("feature_flags")
     .select()
     .eq("id", id)
+    .eq("owner_id", user.id)
     .single();
 
   if (error || !data) {
@@ -158,6 +162,7 @@ featureFlagRoutes.get("/:id", async (c) => {
 
 /** PATCH /:id -- Update a feature flag. */
 featureFlagRoutes.patch("/:id", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const body = parseBody(updateFlagSchema, await c.req.json());
   const db = getSupabase();
@@ -166,6 +171,7 @@ featureFlagRoutes.patch("/:id", async (c) => {
     .from("feature_flags")
     .select()
     .eq("id", id)
+    .eq("owner_id", user.id)
     .single();
 
   if (fetchErr || !current) {
@@ -191,29 +197,32 @@ featureFlagRoutes.patch("/:id", async (c) => {
   const wasToggled =
     body.enabled !== undefined && body.enabled !== flag.enabled;
 
-  await writeAuditLog({
-    actorId: flag.owner_id,
-    action: wasToggled ? "flag.toggled" : "flag.updated",
-    severity: wasToggled ? "warning" : "info",
-    resourceType: "feature_flag",
-    resourceId: id,
-    agentId: flag.agent_id,
-    evidence: {
-      key: flag.key,
-      before: { enabled: flag.enabled, rollout_pct: flag.rollout_pct },
-      after: {
-        enabled: updated.enabled,
-        rollout_pct: updated.rollout_pct,
+  await writeAuditLog(
+    {
+      action: wasToggled ? "flag.toggled" : "flag.updated",
+      severity: wasToggled ? "warning" : "info",
+      resourceType: "feature_flag",
+      resourceId: id,
+      agentId: flag.agent_id,
+      evidence: {
+        key: flag.key,
+        before: { enabled: flag.enabled, rollout_pct: flag.rollout_pct },
+        after: {
+          enabled: updated.enabled,
+          rollout_pct: updated.rollout_pct,
+        },
+        changes: Object.keys(body),
       },
-      changes: Object.keys(body),
     },
-  });
+    c,
+  );
 
   return c.json(updated);
 });
 
 /** DELETE /:id -- Delete a feature flag. */
 featureFlagRoutes.delete("/:id", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
   const db = getSupabase();
 
@@ -221,6 +230,7 @@ featureFlagRoutes.delete("/:id", async (c) => {
     .from("feature_flags")
     .select("id, owner_id, key, agent_id")
     .eq("id", id)
+    .eq("owner_id", user.id)
     .single();
 
   if (fetchErr || !current) {
@@ -238,20 +248,23 @@ featureFlagRoutes.delete("/:id", async (c) => {
     throw new HTTPException(500, { message: error.message });
   }
 
-  await writeAuditLog({
-    actorId: flag.owner_id,
-    action: "flag.deleted",
-    resourceType: "feature_flag",
-    resourceId: id,
-    agentId: flag.agent_id,
-    evidence: { key: flag.key },
-  });
+  await writeAuditLog(
+    {
+      action: "flag.deleted",
+      resourceType: "feature_flag",
+      resourceId: id,
+      agentId: flag.agent_id,
+      evidence: { key: flag.key },
+    },
+    c,
+  );
 
   return c.json({ deleted: true });
 });
 
-/** POST /evaluate -- Evaluate whether a flag is active for a given context. */
+/** POST /evaluate -- Evaluate whether a flag is active for the current user. */
 featureFlagRoutes.post("/evaluate", async (c) => {
+  const user = c.get("user");
   const body = parseBody(evaluateFlagSchema, await c.req.json());
   const db = getSupabase();
 
@@ -260,7 +273,7 @@ featureFlagRoutes.post("/evaluate", async (c) => {
     .from("feature_flags")
     .select()
     .eq("key", body.key)
-    .eq("owner_id", body.owner_id);
+    .eq("owner_id", user.id);
 
   if (body.agent_id) {
     // Try agent-specific flag first, fall back to non-agent-scoped.
@@ -269,10 +282,13 @@ featureFlagRoutes.post("/evaluate", async (c) => {
     q = q.is("agent_id", null);
   }
 
-  const { data, error } = await q.order("agent_id", {
-    ascending: false,
-    nullsFirst: false,
-  }).limit(1).single();
+  const { data, error } = await q
+    .order("agent_id", {
+      ascending: false,
+      nullsFirst: false,
+    })
+    .limit(1)
+    .single();
 
   if (error || !data) {
     // Flag not found -- default to disabled.
@@ -305,9 +321,9 @@ featureFlagRoutes.post("/evaluate", async (c) => {
     return c.json({ key: body.key, enabled: false, reason: "disabled" });
   }
 
-  // Check rollout percentage using a deterministic hash of the owner_id.
+  // Check rollout percentage using a deterministic hash of the user ID.
   if (flag.rollout_pct < 100) {
-    const hash = simpleHash(body.owner_id + body.key);
+    const hash = simpleHash(user.id + body.key);
     const bucket = hash % 100;
     if (bucket >= flag.rollout_pct) {
       return c.json({
