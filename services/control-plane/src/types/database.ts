@@ -151,6 +151,24 @@ export type DeploymentStatus =
 
 export type MetricPeriod = "hourly" | "daily" | "weekly" | "monthly";
 
+export type WebhookEvent =
+  | "agent.created"
+  | "agent.updated"
+  | "agent.deleted"
+  | "session.started"
+  | "session.ended"
+  | "deployment.started"
+  | "deployment.completed"
+  | "deployment.failed"
+  | "eval.completed"
+  | "pipeline.completed"
+  | "pipeline.failed"
+  | "approval.requested"
+  | "approval.resolved"
+  | "error.occurred";
+
+export type DeliveryStatus = "pending" | "success" | "failed" | "retrying";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -589,6 +607,46 @@ export interface AgentUsageDailyRow {
   created_at: string;
 }
 
+export interface AgentWebhookRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  url: string;
+  secret: string;
+  events: WebhookEvent[];
+  is_active: boolean;
+  max_retries: number;
+  retry_delay_seconds: number;
+  timeout_ms: number;
+  total_deliveries: number;
+  failed_deliveries: number;
+  last_delivered_at: string | null;
+  last_error: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookDeliveryRow {
+  id: string;
+  webhook_id: string;
+  agent_id: string;
+  event: WebhookEvent;
+  status: DeliveryStatus;
+  payload: Record<string, unknown>;
+  response_status: number | null;
+  response_body: string | null;
+  response_time_ms: string | null;
+  attempt_number: number;
+  max_attempts: number;
+  next_retry_at: string | null;
+  error_message: string | null;
+  delivered_at: string | null;
+  created_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -877,6 +935,28 @@ export interface Database {
           usage_date: string;
         };
         Update: Partial<AgentUsageDailyRow>;
+        Relationships: Rel[];
+      };
+      agent_webhooks: {
+        Row: AgentWebhookRow;
+        Insert: Partial<AgentWebhookRow> & {
+          agent_id: string;
+          owner_id: string;
+          name: string;
+          url: string;
+          secret: string;
+        };
+        Update: Partial<AgentWebhookRow>;
+        Relationships: Rel[];
+      };
+      webhook_deliveries: {
+        Row: WebhookDeliveryRow;
+        Insert: Partial<WebhookDeliveryRow> & {
+          webhook_id: string;
+          agent_id: string;
+          event: WebhookEvent;
+        };
+        Update: Partial<WebhookDeliveryRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {
