@@ -74,6 +74,8 @@ export type AuditSeverity = "info" | "warning" | "critical";
 
 export type MemoryType = "episodic" | "semantic" | "procedural" | "reflection";
 
+export type AgentRole = "owner" | "admin" | "editor" | "viewer";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -221,6 +223,18 @@ export interface AgentMemoryRow {
   updated_at: string;
 }
 
+export interface AgentPermissionRow {
+  id: string;
+  agent_id: string;
+  user_id: string;
+  role: AgentRole;
+  granted_by: string | null;
+  expires_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -347,6 +361,15 @@ export interface Database {
           content: string;
         };
         Update: Partial<AgentMemoryRow>;
+        Relationships: Rel[];
+      };
+      agent_permissions: {
+        Row: AgentPermissionRow;
+        Insert: Partial<AgentPermissionRow> & {
+          agent_id: string;
+          user_id: string;
+        };
+        Update: Partial<AgentPermissionRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {
