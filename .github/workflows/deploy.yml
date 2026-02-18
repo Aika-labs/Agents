@@ -196,11 +196,32 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve runtime URLs
+        id: urls
+        run: |
+          RT_URL=$(gcloud run services describe agent-runtime-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)' 2>/dev/null || echo "")
+          echo "runtime_url=${RT_URL}" >> "$GITHUB_OUTPUT"
+
       - uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: control-plane-api
           region: ${{ env.GCP_REGION }}
           image: ${{ needs.build-push-control-plane.outputs.image }}
+          env_vars: |
+            NODE_ENV=production
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            GCP_PROJECT=${{ secrets.GCP_PROJECT_ID }}
+            GCP_REGION=${{ env.GCP_REGION }}
+            AGENT_RUNTIME_URL=${{ steps.urls.outputs.runtime_url }}
+          secrets: |
+            SUPABASE_URL=agents-supabase-url-${{ env.ENVIRONMENT }}:latest
+            SUPABASE_SERVICE_ROLE_KEY=agents-supabase-key-${{ env.ENVIRONMENT }}:latest
+          flags: |
+            --vpc-connector=projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/connectors/agents-vpc
 
       - name: Verify deployment
         run: |
@@ -237,11 +258,24 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - uses: google-github-actions/setup-gcloud@v2
+
       - uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: agent-runtime-api
           region: ${{ env.GCP_REGION }}
           image: ${{ needs.build-push-agent-runtime.outputs.image }}
+          env_vars: |
+            NODE_ENV=production
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            PORT=8081
+            GCP_PROJECT=${{ secrets.GCP_PROJECT_ID }}
+            GCP_REGION=${{ env.GCP_REGION }}
+          secrets: |
+            SUPABASE_URL=agents-supabase-url-${{ env.ENVIRONMENT }}:latest
+            SUPABASE_SERVICE_ROLE_KEY=agents-supabase-key-${{ env.ENVIRONMENT }}:latest
+          flags: |
+            --vpc-connector=projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/connectors/agents-vpc
 
       - name: Verify deployment
         run: |
@@ -278,11 +312,35 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve service URLs
+        id: urls
+        run: |
+          CP_URL=$(gcloud run services describe control-plane-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)' 2>/dev/null || echo "")
+          RT_URL=$(gcloud run services describe agent-runtime-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)' 2>/dev/null || echo "")
+          echo "cp_url=${CP_URL}" >> "$GITHUB_OUTPUT"
+          echo "rt_url=${RT_URL}" >> "$GITHUB_OUTPUT"
+
       - uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: protocols-api
           region: ${{ env.GCP_REGION }}
           image: ${{ needs.build-push-protocols.outputs.image }}
+          env_vars: |
+            NODE_ENV=production
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            PORT=8082
+            CONTROL_PLANE_URL=${{ steps.urls.outputs.cp_url }}
+            AGENT_RUNTIME_URL=${{ steps.urls.outputs.rt_url }}
+          secrets: |
+            INTERNAL_API_KEY=agents-internal-api-key-${{ env.ENVIRONMENT }}:latest
+          flags: |
+            --vpc-connector=projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/connectors/agents-vpc
 
       - name: Verify deployment
         run: |

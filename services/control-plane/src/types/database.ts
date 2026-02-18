@@ -684,6 +684,18 @@ export interface MarketplaceReviewRow {
   updated_at: string;
 }
 
+export interface ApiKeyRow {
+  id: string;
+  owner_id: string;
+  key_hash: string;
+  label: string;
+  scopes: string[];
+  is_active: boolean;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
 // -- Supabase Database interface ----------------------------------------------
 // Matches the GenericSchema / GenericTable shape expected by @supabase/postgrest-js v2.
 
@@ -978,6 +990,16 @@ export interface Database {
           rating: number;
         };
         Update: Partial<MarketplaceReviewRow>;
+        Relationships: Rel[];
+      };
+      api_keys: {
+        Row: ApiKeyRow;
+        Insert: Partial<ApiKeyRow> & {
+          owner_id: string;
+          key_hash: string;
+          label: string;
+        };
+        Update: Partial<ApiKeyRow>;
         Relationships: Rel[];
       };
     };

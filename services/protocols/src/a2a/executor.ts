@@ -12,6 +12,10 @@ import type { Message } from "@a2a-js/sdk";
  * from remote A2A clients. Routes tasks to the appropriate agent on
  * the platform by forwarding messages to the control plane API.
  *
+ * Auth: Uses a service-level API key (INTERNAL_API_KEY env var) to
+ * authenticate with the control plane. This key should be created in
+ * the api_keys table with appropriate scopes.
+ *
  * Flow:
  *   1. Remote agent sends a task via A2A
  *   2. Executor extracts the text message
@@ -23,6 +27,31 @@ import type { Message } from "@a2a-js/sdk";
 function getControlPlaneUrl(): string {
   return process.env["CONTROL_PLANE_URL"] ?? "http://localhost:8080";
 }
+
+/**
+ * Build auth headers for internal service-to-service calls.
+ *
+ * Uses INTERNAL_API_KEY env var to authenticate with the control plane.
+ * Falls back to empty headers in development (control plane may have
+ * auth disabled locally).
+ */
+function getServiceAuthHeaders(): Record<string, string> {
+  const apiKey = process.env["INTERNAL_API_KEY"];
+  if (apiKey) {
+    return { "X-API-Key": apiKey };
+  }
+  // In development without an API key, log a warning once.
+  if (!warnedNoApiKey) {
+    console.warn(
+      "[A2A] INTERNAL_API_KEY not set -- control plane calls will be unauthenticated. " +
+        "Set this env var in production.",
+    );
+    warnedNoApiKey = true;
+  }
+  return {};
+}
+
+let warnedNoApiKey = false;
 
 export class PlatformAgentExecutor implements AgentExecutor {
   private readonly agentId: string | null;
@@ -122,12 +151,13 @@ export class PlatformAgentExecutor implements AgentExecutor {
     contextId: string,
   ): Promise<string> {
     const cpUrl = getControlPlaneUrl();
+    const authHeaders = getServiceAuthHeaders();
 
     // Create or reuse a session. Use contextId as a stable session key.
     // For simplicity, create a new session per context.
     const sessionRes = await fetch(`${cpUrl}/agents/${agentId}/sessions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ title: `A2A session ${contextId}` }),
     });
 
@@ -143,7 +173,7 @@ export class PlatformAgentExecutor implements AgentExecutor {
       `${cpUrl}/agents/${agentId}/sessions/${session.id}/messages`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ content: message, role: "user" }),
       },
     );
@@ -162,11 +192,12 @@ export class PlatformAgentExecutor implements AgentExecutor {
    */
   private async handlePlatformTask(message: string): Promise<string> {
     const cpUrl = getControlPlaneUrl();
+    const authHeaders = getServiceAuthHeaders();
     const lower = message.toLowerCase();
 
     // Simple intent detection for platform commands.
     if (lower.includes("list agents") || lower.includes("show agents")) {
-      const res = await fetch(`${cpUrl}/agents`);
+      const res = await fetch(`${cpUrl}/agents`, { headers: authHeaders });
       if (!res.ok) return "Failed to list agents.";
       const data = (await res.json()) as { data: Array<{ id: string; name: string; status: string }> };
       if (!data.data || data.data.length === 0) return "No agents found.";
