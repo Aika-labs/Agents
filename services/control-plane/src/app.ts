@@ -12,6 +12,7 @@ import { sessionRoutes } from "./routes/sessions.js";
 import { featureFlagRoutes } from "./routes/feature-flags.js";
 import { auditRoutes } from "./routes/audit.js";
 import { memoryRoutes } from "./routes/memory.js";
+import { permissionRoutes } from "./routes/permissions.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -76,6 +77,10 @@ app.route("/agents", agentRoutes);
 app.route("/sessions", sessionRoutes);
 app.route("/feature-flags", featureFlagRoutes);
 app.route("/audit-logs", auditRoutes);
+
+// Permissions routes: /agents/:agentId/permissions/*
+// Auth middleware on /agents/* already covers these paths.
+app.route("/agents/:agentId/permissions", permissionRoutes);
 
 // Memory routes use nested paths under /agents/:agentId/... so mount at root.
 // Auth middleware on /agents/* already covers these paths.
