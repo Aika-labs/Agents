@@ -1,6 +1,6 @@
 # Deploy -- Build, push, and deploy on merge to main.
 # Handles Docker image build + push to Artifact Registry, Cloud Run deploy,
-# GKE deploy, and Supabase migrations.
+# and Supabase migrations.
 
 name: Deploy
 
@@ -221,48 +221,45 @@ jobs:
           exit 1
 
   # --------------------------------------------------------------------------
-  # Deploy agent-runtime to GKE.
+  # Deploy agent-runtime to Cloud Run.
   # --------------------------------------------------------------------------
   deploy-agent-runtime:
-    name: "Deploy agent-runtime to GKE"
+    name: "Deploy agent-runtime to Cloud Run"
     needs: build-push-agent-runtime
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: agent-runtime-api
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build-push-agent-runtime.outputs.image }}
 
-      - name: Install gke-gcloud-auth-plugin
-        run: gcloud components install gke-gcloud-auth-plugin --quiet
-
-      - name: Get GKE credentials
+      - name: Verify deployment
         run: |
-          gcloud container clusters get-credentials agents-runtime \
+          URL=$(gcloud run services describe agent-runtime-api \
             --region=${{ env.GCP_REGION }} \
-            --project=${{ secrets.GCP_PROJECT_ID }}
-
-      - name: Deploy to GKE
-        run: |
-          # Update the agent-runtime deployment image.
-          kubectl set image deployment/agent-runtime \
-            agent-runtime=${{ needs.build-push-agent-runtime.outputs.image }} \
-            --namespace=agents || \
-          echo "Deployment not found -- initial deploy requires kubectl apply with manifests."
-
-      - name: Verify rollout
-        run: |
-          kubectl rollout status deployment/agent-runtime \
-            --namespace=agents --timeout=120s || \
-          echo "WARNING: Rollout did not complete within 120s."
+            --format='value(status.url)')
+          echo "Service URL: ${URL}"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt ${i}/10: got HTTP ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+          echo "WARNING: Health check did not return 200 after 10 attempts."
+          exit 1
 
   # --------------------------------------------------------------------------
   # Deploy protocols service to Cloud Run.

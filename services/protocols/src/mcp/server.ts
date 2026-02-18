@@ -194,7 +194,7 @@ function registerTools(mcp: McpServer): void {
   // Start agent
   mcp.tool(
     "start_agent",
-    "Start an agent on the runtime (deploys to GKE).",
+    "Start an agent on the runtime.",
     {
       agent_id: z.string().uuid().describe("Agent UUID to start"),
     },
