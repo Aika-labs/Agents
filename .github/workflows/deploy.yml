@@ -1,0 +1,197 @@
+# Deploy -- Build, push, and deploy on merge to main.
+# Handles Docker image build + push to Artifact Registry, Cloud Run deploy,
+# and Supabase migrations.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false # Never cancel an in-progress deploy.
+
+env:
+  GCP_REGION: us-central1
+  ENVIRONMENT: dev
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Detect which directories changed to skip unnecessary work.
+  # --------------------------------------------------------------------------
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      infra: ${{ steps.filter.outputs.infra }}
+      control-plane: ${{ steps.filter.outputs.control-plane }}
+      supabase: ${{ steps.filter.outputs.supabase }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: ${{ github.event.before }}
+          filters: |
+            infra:
+              - 'infra/**'
+            control-plane:
+              - 'services/control-plane/**'
+            supabase:
+              - 'supabase/**'
+
+  # --------------------------------------------------------------------------
+  # Build control-plane Docker image and push to Artifact Registry.
+  # --------------------------------------------------------------------------
+  build-push:
+    name: "Build & push control-plane image"
+    needs: changes
+    if: needs.changes.outputs.control-plane == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation.
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          REPO="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/agents-${{ env.ENVIRONMENT }}/control-plane"
+          SHA_TAG="${REPO}:${{ github.sha }}"
+          LATEST_TAG="${REPO}:latest"
+          echo "image=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/control-plane
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.sha_tag }}
+            ${{ steps.meta.outputs.latest_tag }}
+          cache-from: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache,mode=max
+
+  # --------------------------------------------------------------------------
+  # Deploy new image to Cloud Run (dev environment).
+  # --------------------------------------------------------------------------
+  deploy-cloud-run:
+    name: "Deploy to Cloud Run (dev)"
+    needs: build-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: control-plane-api
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build-push.outputs.image }}
+
+      - name: Verify deployment
+        run: |
+          URL=$(gcloud run services describe control-plane-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          echo "Service URL: ${URL}"
+          # Wait for the new revision to become healthy.
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt ${i}/10: got HTTP ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+          echo "WARNING: Health check did not return 200 after 10 attempts."
+          exit 1
+
+  # --------------------------------------------------------------------------
+  # Run Supabase migrations.
+  # --------------------------------------------------------------------------
+  migrate-supabase:
+    name: "Run Supabase migrations"
+    needs: changes
+    if: needs.changes.outputs.supabase == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run migrations
+        run: |
+          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  # --------------------------------------------------------------------------
+  # Pulumi deploy (dev stack) when infra/ changes.
+  # --------------------------------------------------------------------------
+  pulumi-deploy:
+    name: "Pulumi up (dev)"
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - run: npm ci
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: pulumi/actions@v6
+        with:
+          command: up
+          stack-name: dev
+          work-dir: infra
+          cloud-url: https://api.pulumi.com
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
