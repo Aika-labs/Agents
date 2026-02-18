@@ -106,6 +106,30 @@ export type EvalScorerType =
   | "json_match"
   | "custom";
 
+export type ConnectorType =
+  | "gcs"
+  | "supabase"
+  | "http_webhook"
+  | "redis"
+  | "postgresql"
+  | "custom";
+
+export type PipelineStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type PipelineStepType =
+  | "extract"
+  | "transform"
+  | "load"
+  | "validate"
+  | "enrich"
+  | "branch"
+  | "custom";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -368,6 +392,75 @@ export interface EvalResultRow {
   created_at: string;
 }
 
+export interface DataConnectorRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  connector_type: ConnectorType;
+  config: Record<string, unknown>;
+  is_source: boolean;
+  is_sink: boolean;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DataPipelineRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  source_connector_id: string | null;
+  sink_connector_id: string | null;
+  schedule_cron: string | null;
+  is_active: boolean;
+  max_concurrency: number;
+  max_retries: number;
+  retry_delay_seconds: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PipelineStepRow {
+  id: string;
+  pipeline_id: string;
+  name: string;
+  step_type: PipelineStepType;
+  config: Record<string, unknown>;
+  sort_order: number;
+  connector_id: string | null;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PipelineRunRow {
+  id: string;
+  pipeline_id: string;
+  agent_id: string;
+  owner_id: string;
+  status: PipelineStatus;
+  step_results: unknown[];
+  records_read: number;
+  records_written: number;
+  records_failed: number;
+  bytes_processed: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  error_step: string | null;
+  attempt_number: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -564,6 +657,47 @@ export interface Database {
           case_id: string;
         };
         Update: Partial<EvalResultRow>;
+        Relationships: Rel[];
+      };
+      data_connectors: {
+        Row: DataConnectorRow;
+        Insert: Partial<DataConnectorRow> & {
+          agent_id: string;
+          owner_id: string;
+          name: string;
+          connector_type: ConnectorType;
+        };
+        Update: Partial<DataConnectorRow>;
+        Relationships: Rel[];
+      };
+      data_pipelines: {
+        Row: DataPipelineRow;
+        Insert: Partial<DataPipelineRow> & {
+          agent_id: string;
+          owner_id: string;
+          name: string;
+        };
+        Update: Partial<DataPipelineRow>;
+        Relationships: Rel[];
+      };
+      pipeline_steps: {
+        Row: PipelineStepRow;
+        Insert: Partial<PipelineStepRow> & {
+          pipeline_id: string;
+          name: string;
+          step_type: PipelineStepType;
+        };
+        Update: Partial<PipelineStepRow>;
+        Relationships: Rel[];
+      };
+      pipeline_runs: {
+        Row: PipelineRunRow;
+        Insert: Partial<PipelineRunRow> & {
+          pipeline_id: string;
+          agent_id: string;
+          owner_id: string;
+        };
+        Update: Partial<PipelineRunRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {

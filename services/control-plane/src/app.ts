@@ -15,6 +15,12 @@ import { memoryRoutes } from "./routes/memory.js";
 import { permissionRoutes } from "./routes/permissions.js";
 import { approvalRoutes, hitlPolicyRoutes } from "./routes/hitl.js";
 import { evalSuiteRoutes, evalCaseRoutes, evalRunRoutes } from "./routes/evals.js";
+import {
+  connectorRoutes,
+  pipelineRoutes,
+  pipelineStepRoutes,
+  pipelineRunRoutes,
+} from "./routes/pipelines.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -92,6 +98,12 @@ app.route("/agents/:agentId/hitl-policies", hitlPolicyRoutes);
 app.route("/agents/:agentId/evals/suites", evalSuiteRoutes);
 app.route("/agents/:agentId/evals/suites/:suiteId/cases", evalCaseRoutes);
 app.route("/agents/:agentId/evals/runs", evalRunRoutes);
+
+// Data pipeline routes: connectors, pipelines, steps, and runs under /agents/:agentId/data/*.
+app.route("/agents/:agentId/data/connectors", connectorRoutes);
+app.route("/agents/:agentId/data/pipelines", pipelineRoutes);
+app.route("/agents/:agentId/data/pipelines/:pipelineId/steps", pipelineStepRoutes);
+app.route("/agents/:agentId/data/runs", pipelineRunRoutes);
 
 // Memory routes use nested paths under /agents/:agentId/... so mount at root.
 // Auth middleware on /agents/* already covers these paths.
