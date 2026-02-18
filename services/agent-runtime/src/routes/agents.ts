@@ -1,21 +1,11 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { LifecycleManager } from "../k8s/lifecycle.js";
+import { lifecycle } from "../lifecycle/instance.js";
 import { publishStatus } from "../redis/events.js";
 import type { AgentConfig } from "../frameworks/types.js";
 
 export const agentRuntimeRoutes = new Hono();
-
-// Singleton lifecycle manager. Initialized lazily on first request.
-let lifecycle: LifecycleManager | null = null;
-
-function getLifecycle(): LifecycleManager {
-  if (!lifecycle) {
-    lifecycle = new LifecycleManager();
-  }
-  return lifecycle;
-}
 
 // -- Zod schemas --------------------------------------------------------------
 
@@ -75,7 +65,7 @@ const startAgentSchema = z.object({
 
 // -- Routes -------------------------------------------------------------------
 
-/** POST /:id/start -- Start an agent on GKE. */
+/** POST /:id/start -- Start an agent in-process. */
 agentRuntimeRoutes.post("/:id/start", async (c) => {
   const agentId = c.req.param("id");
   const body = await c.req.json();
@@ -93,7 +83,7 @@ agentRuntimeRoutes.post("/:id/start", async (c) => {
   }
 
   const config: AgentConfig = parsed.data;
-  const mgr = getLifecycle();
+  const mgr = lifecycle;
 
   // Check if already running.
   const currentStatus = await mgr.getAgentStatus(agentId);
@@ -119,7 +109,7 @@ agentRuntimeRoutes.post("/:id/start", async (c) => {
 /** POST /:id/stop -- Stop an agent gracefully. */
 agentRuntimeRoutes.post("/:id/stop", async (c) => {
   const agentId = c.req.param("id");
-  const mgr = getLifecycle();
+  const mgr = lifecycle;
 
   const currentStatus = await mgr.getAgentStatus(agentId);
   if (currentStatus === "stopped") {
@@ -137,10 +127,10 @@ agentRuntimeRoutes.post("/:id/stop", async (c) => {
   return c.json({ agentId, status: "stopping" }, 202);
 });
 
-/** POST /:id/pause -- Pause an agent (scale to 0). */
+/** POST /:id/pause -- Pause an agent (stop runner, keep config). */
 agentRuntimeRoutes.post("/:id/pause", async (c) => {
   const agentId = c.req.param("id");
-  const mgr = getLifecycle();
+  const mgr = lifecycle;
 
   const currentStatus = await mgr.getAgentStatus(agentId);
   if (currentStatus === "paused") {
@@ -163,10 +153,10 @@ agentRuntimeRoutes.post("/:id/pause", async (c) => {
   return c.json({ agentId, status: "paused" }, 202);
 });
 
-/** POST /:id/resume -- Resume a paused agent (scale to 1). */
+/** POST /:id/resume -- Resume a paused agent (re-init runner). */
 agentRuntimeRoutes.post("/:id/resume", async (c) => {
   const agentId = c.req.param("id");
-  const mgr = getLifecycle();
+  const mgr = lifecycle;
 
   const currentStatus = await mgr.getAgentStatus(agentId);
   if (currentStatus !== "paused") {
@@ -189,7 +179,7 @@ agentRuntimeRoutes.post("/:id/resume", async (c) => {
 /** POST /:id/kill -- Kill an agent immediately (no grace period). */
 agentRuntimeRoutes.post("/:id/kill", async (c) => {
   const agentId = c.req.param("id");
-  const mgr = getLifecycle();
+  const mgr = lifecycle;
 
   await mgr.killAgent(agentId);
 
@@ -206,7 +196,7 @@ agentRuntimeRoutes.post("/:id/kill", async (c) => {
 /** GET /:id/status -- Get the runtime status of an agent. */
 agentRuntimeRoutes.get("/:id/status", async (c) => {
   const agentId = c.req.param("id");
-  const mgr = getLifecycle();
+  const mgr = lifecycle;
 
   const status = await mgr.getAgentStatus(agentId);
 
@@ -215,7 +205,7 @@ agentRuntimeRoutes.get("/:id/status", async (c) => {
 
 /** GET / -- List all agent deployments managed by the runtime. */
 agentRuntimeRoutes.get("/", async (c) => {
-  const mgr = getLifecycle();
+  const mgr = lifecycle;
   const agents = await mgr.listAgents();
 
   return c.json({ data: agents, total: agents.length });
