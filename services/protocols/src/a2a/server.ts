@@ -6,11 +6,11 @@ import {
 import {
   agentCardHandler,
   jsonRpcHandler,
-  UserBuilder,
 } from "@a2a-js/sdk/server/express";
 import { AGENT_CARD_PATH } from "@a2a-js/sdk";
 import { buildPlatformAgentCard, buildAgentCard as buildAgentCardForAgent } from "./agent-card.js";
 import { PlatformAgentExecutor } from "./executor.js";
+import { a2aUserBuilder } from "./auth.js";
 
 /**
  * Create the A2A Express app.
@@ -49,7 +49,7 @@ export function createA2AApp(): express.Express {
     "/a2a/jsonrpc",
     jsonRpcHandler({
       requestHandler,
-      userBuilder: UserBuilder.noAuthentication,
+      userBuilder: a2aUserBuilder,
     }),
   );
 
@@ -102,7 +102,7 @@ export function createAgentA2AApp(agent: {
     "/jsonrpc",
     jsonRpcHandler({
       requestHandler,
-      userBuilder: UserBuilder.noAuthentication,
+      userBuilder: a2aUserBuilder,
     }),
   );
 

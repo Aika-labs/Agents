@@ -121,7 +121,7 @@ jobs:
   # Protocols Service (Hono + Express TypeScript)
   # --------------------------------------------------------------------------
   protocols-check:
-    name: "Protocols: lint + typecheck"
+    name: "Protocols: lint + typecheck + test"
     needs: changes
     if: needs.changes.outputs.protocols == 'true'
     runs-on: ubuntu-latest
@@ -140,6 +140,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm test
 
   # --------------------------------------------------------------------------
   # SQL lint for Supabase migrations (basic syntax check).
