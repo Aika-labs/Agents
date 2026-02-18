@@ -91,6 +91,21 @@ export type HitlTriggerType =
   | "escalation"
   | "custom";
 
+export type EvalRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type EvalScorerType =
+  | "exact_match"
+  | "contains"
+  | "regex"
+  | "semantic"
+  | "json_match"
+  | "custom";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -288,6 +303,71 @@ export interface ApprovalRequestRow {
   updated_at: string;
 }
 
+export interface EvalSuiteRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  tags: string[];
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvalCaseRow {
+  id: string;
+  suite_id: string;
+  name: string;
+  description: string | null;
+  input: string;
+  expected_output: string | null;
+  scorer_type: EvalScorerType;
+  scorer_config: Record<string, unknown>;
+  timeout_seconds: number;
+  sort_order: number;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvalRunRow {
+  id: string;
+  suite_id: string;
+  agent_id: string;
+  owner_id: string;
+  status: EvalRunStatus;
+  total_cases: number;
+  passed_cases: number;
+  failed_cases: number;
+  avg_score: string;
+  avg_latency_ms: string;
+  agent_version: number | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvalResultRow {
+  id: string;
+  run_id: string;
+  case_id: string;
+  actual_output: string | null;
+  score: string;
+  passed: boolean;
+  latency_ms: string | null;
+  token_count: number | null;
+  scorer_output: Record<string, unknown>;
+  error_message: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -445,6 +525,45 @@ export interface Database {
           action_summary: string;
         };
         Update: Partial<ApprovalRequestRow>;
+        Relationships: Rel[];
+      };
+      eval_suites: {
+        Row: EvalSuiteRow;
+        Insert: Partial<EvalSuiteRow> & {
+          agent_id: string;
+          owner_id: string;
+          name: string;
+        };
+        Update: Partial<EvalSuiteRow>;
+        Relationships: Rel[];
+      };
+      eval_cases: {
+        Row: EvalCaseRow;
+        Insert: Partial<EvalCaseRow> & {
+          suite_id: string;
+          name: string;
+          input: string;
+        };
+        Update: Partial<EvalCaseRow>;
+        Relationships: Rel[];
+      };
+      eval_runs: {
+        Row: EvalRunRow;
+        Insert: Partial<EvalRunRow> & {
+          suite_id: string;
+          agent_id: string;
+          owner_id: string;
+        };
+        Update: Partial<EvalRunRow>;
+        Relationships: Rel[];
+      };
+      eval_results: {
+        Row: EvalResultRow;
+        Insert: Partial<EvalResultRow> & {
+          run_id: string;
+          case_id: string;
+        };
+        Update: Partial<EvalResultRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {

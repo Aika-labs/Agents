@@ -14,6 +14,7 @@ import { auditRoutes } from "./routes/audit.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { permissionRoutes } from "./routes/permissions.js";
 import { approvalRoutes, hitlPolicyRoutes } from "./routes/hitl.js";
+import { evalSuiteRoutes, evalCaseRoutes, evalRunRoutes } from "./routes/evals.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -86,6 +87,11 @@ app.route("/agents/:agentId/permissions", permissionRoutes);
 // HITL routes: approval requests and policies under /agents/:agentId/*.
 app.route("/agents/:agentId/approvals", approvalRoutes);
 app.route("/agents/:agentId/hitl-policies", hitlPolicyRoutes);
+
+// Eval routes: test suites, cases, and runs under /agents/:agentId/evals/*.
+app.route("/agents/:agentId/evals/suites", evalSuiteRoutes);
+app.route("/agents/:agentId/evals/suites/:suiteId/cases", evalCaseRoutes);
+app.route("/agents/:agentId/evals/runs", evalRunRoutes);
 
 // Memory routes use nested paths under /agents/:agentId/... so mount at root.
 // Auth middleware on /agents/* already covers these paths.
