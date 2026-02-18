@@ -1,0 +1,31 @@
+{
+  "name": "@agents/protocols",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP + A2A protocol integration service for the Agent Operating System",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint 'src/**/*.ts'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "@a2a-js/sdk": "^0.3.10",
+    "@hono/node-server": "^1.13.8",
+    "hono": "^4.7.0",
+    "zod": "^3.24.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0"
+  }
+}

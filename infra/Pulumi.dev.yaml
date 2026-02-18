@@ -1,0 +1,4 @@
+config:
+  gcp:project: PLACEHOLDER_PROJECT_ID
+  gcp:region: us-central1
+  agents-platform:environment: dev

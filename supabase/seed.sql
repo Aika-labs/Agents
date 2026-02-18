@@ -1,0 +1,55 @@
+-- seed.sql
+-- Development seed data. Applied via: supabase db reset
+--
+-- NOTE: This seed assumes a test user already exists in auth.users.
+-- When running locally with `supabase start`, create a user first via
+-- the Supabase Dashboard (http://localhost:54323) or the Auth API, then
+-- replace the UUID below with that user's ID.
+
+-- Placeholder user ID (replace after creating a test user).
+-- do $$
+-- declare
+--     test_user_id uuid := '00000000-0000-0000-0000-000000000001';
+-- begin
+--
+-- -- Sample agent: Research Assistant
+-- insert into public.agents (owner_id, name, description, framework, model_config, system_prompt, status, tags)
+-- values (
+--     test_user_id,
+--     'Research Assistant',
+--     'An AI agent that searches the web, summarizes papers, and answers research questions.',
+--     'google_adk',
+--     '{"provider": "google", "model": "gemini-2.0-flash", "temperature": 0.3}'::jsonb,
+--     'You are a research assistant. Search for information, cite sources, and provide concise summaries.',
+--     'running',
+--     array['research', 'search', 'summarization']
+-- );
+--
+-- -- Sample agent: Trading Bot
+-- insert into public.agents (owner_id, name, description, framework, model_config, system_prompt, status, tags)
+-- values (
+--     test_user_id,
+--     'DeFi Trading Agent',
+--     'Autonomous agent that monitors DeFi protocols and executes trades on Base.',
+--     'langgraph',
+--     '{"provider": "openai", "model": "gpt-4o", "temperature": 0.1}'::jsonb,
+--     'You are a DeFi trading agent. Monitor liquidity pools, analyze opportunities, and execute trades within risk parameters.',
+--     'paused',
+--     array['defi', 'trading', 'crypto', 'base']
+-- );
+--
+-- -- Sample feature flag
+-- insert into public.feature_flags (owner_id, key, name, description, scope, enabled)
+-- values (
+--     test_user_id,
+--     'enable_a2a_protocol',
+--     'A2A Protocol Support',
+--     'Enable Agent-to-Agent communication via the A2A protocol.',
+--     'platform',
+--     true
+-- );
+--
+-- end $$;
+
+-- Uncomment the block above after creating a test user.
+select 'Seed file loaded. Uncomment the insert block after creating a test user.' as info;
