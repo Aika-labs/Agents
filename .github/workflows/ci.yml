@@ -1,5 +1,5 @@
-# CI -- Lint and typecheck on every pull request.
-# Runs checks for both infra/ (Pulumi IaC) and services/control-plane/ (API).
+# CI -- Lint, typecheck, and test on every pull request.
+# Runs checks for infra/, all three services, and Supabase migrations.
 
 name: CI
 
@@ -23,6 +23,8 @@ jobs:
     outputs:
       infra: ${{ steps.filter.outputs.infra }}
       control-plane: ${{ steps.filter.outputs.control-plane }}
+      agent-runtime: ${{ steps.filter.outputs.agent-runtime }}
+      protocols: ${{ steps.filter.outputs.protocols }}
       supabase: ${{ steps.filter.outputs.supabase }}
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +36,10 @@ jobs:
               - 'infra/**'
             control-plane:
               - 'services/control-plane/**'
+            agent-runtime:
+              - 'services/agent-runtime/**'
+            protocols:
+              - 'services/protocols/**'
             supabase:
               - 'supabase/**'
 
@@ -65,7 +71,7 @@ jobs:
   # Control Plane API (Hono TypeScript)
   # --------------------------------------------------------------------------
   control-plane-check:
-    name: "Control Plane: lint + typecheck"
+    name: "Control Plane: lint + typecheck + test"
     needs: changes
     if: needs.changes.outputs.control-plane == 'true'
     runs-on: ubuntu-latest
@@ -80,6 +86,56 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: services/control-plane/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  # --------------------------------------------------------------------------
+  # Agent Runtime (Hono TypeScript)
+  # --------------------------------------------------------------------------
+  agent-runtime-check:
+    name: "Agent Runtime: lint + typecheck + test"
+    needs: changes
+    if: needs.changes.outputs.agent-runtime == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/agent-runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/agent-runtime/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  # --------------------------------------------------------------------------
+  # Protocols Service (Hono + Express TypeScript)
+  # --------------------------------------------------------------------------
+  protocols-check:
+    name: "Protocols: lint + typecheck"
+    needs: changes
+    if: needs.changes.outputs.protocols == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/protocols
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/protocols/package-lock.json
 
       - run: npm ci
       - run: npm run typecheck

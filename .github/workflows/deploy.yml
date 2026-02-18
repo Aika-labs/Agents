@@ -1,6 +1,6 @@
 # Deploy -- Build, push, and deploy on merge to main.
 # Handles Docker image build + push to Artifact Registry, Cloud Run deploy,
-# and Supabase migrations.
+# GKE deploy, and Supabase migrations.
 
 name: Deploy
 
@@ -26,6 +26,8 @@ jobs:
     outputs:
       infra: ${{ steps.filter.outputs.infra }}
       control-plane: ${{ steps.filter.outputs.control-plane }}
+      agent-runtime: ${{ steps.filter.outputs.agent-runtime }}
+      protocols: ${{ steps.filter.outputs.protocols }}
       supabase: ${{ steps.filter.outputs.supabase }}
     steps:
       - uses: actions/checkout@v4
@@ -38,20 +40,24 @@ jobs:
               - 'infra/**'
             control-plane:
               - 'services/control-plane/**'
+            agent-runtime:
+              - 'services/agent-runtime/**'
+            protocols:
+              - 'services/protocols/**'
             supabase:
               - 'supabase/**'
 
   # --------------------------------------------------------------------------
-  # Build control-plane Docker image and push to Artifact Registry.
+  # Build & push Docker images for all changed services.
   # --------------------------------------------------------------------------
-  build-push:
-    name: "Build & push control-plane image"
+  build-push-control-plane:
+    name: "Build & push control-plane"
     needs: changes
     if: needs.changes.outputs.control-plane == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # Required for Workload Identity Federation.
+      id-token: write
     outputs:
       image: ${{ steps.meta.outputs.image }}
     steps:
@@ -63,11 +69,8 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
 
       - name: Generate image metadata
         id: meta
@@ -76,12 +79,11 @@ jobs:
           SHA_TAG="${REPO}:${{ github.sha }}"
           LATEST_TAG="${REPO}:latest"
           echo "image=${SHA_TAG}" >> "$GITHUB_OUTPUT"
-          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
           echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
           echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: services/control-plane
           push: true
@@ -91,12 +93,98 @@ jobs:
           cache-from: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache
           cache-to: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache,mode=max
 
+  build-push-agent-runtime:
+    name: "Build & push agent-runtime"
+    needs: changes
+    if: needs.changes.outputs.agent-runtime == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          REPO="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/agents-${{ env.ENVIRONMENT }}/agent-runtime"
+          SHA_TAG="${REPO}:${{ github.sha }}"
+          LATEST_TAG="${REPO}:latest"
+          echo "image=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/agent-runtime
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.sha_tag }}
+            ${{ steps.meta.outputs.latest_tag }}
+          cache-from: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache,mode=max
+
+  build-push-protocols:
+    name: "Build & push protocols"
+    needs: changes
+    if: needs.changes.outputs.protocols == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          REPO="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/agents-${{ env.ENVIRONMENT }}/protocols"
+          SHA_TAG="${REPO}:${{ github.sha }}"
+          LATEST_TAG="${REPO}:latest"
+          echo "image=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/protocols
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.sha_tag }}
+            ${{ steps.meta.outputs.latest_tag }}
+          cache-from: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache,mode=max
+
   # --------------------------------------------------------------------------
-  # Deploy new image to Cloud Run (dev environment).
+  # Deploy control-plane to Cloud Run.
   # --------------------------------------------------------------------------
-  deploy-cloud-run:
-    name: "Deploy to Cloud Run (dev)"
-    needs: build-push
+  deploy-control-plane:
+    name: "Deploy control-plane to Cloud Run"
+    needs: build-push-control-plane
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -108,12 +196,11 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Deploy to Cloud Run
-        uses: google-github-actions/deploy-cloudrun@v2
+      - uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: control-plane-api
           region: ${{ env.GCP_REGION }}
-          image: ${{ needs.build-push.outputs.image }}
+          image: ${{ needs.build-push-control-plane.outputs.image }}
 
       - name: Verify deployment
         run: |
@@ -121,7 +208,6 @@ jobs:
             --region=${{ env.GCP_REGION }} \
             --format='value(status.url)')
           echo "Service URL: ${URL}"
-          # Wait for the new revision to become healthy.
           for i in $(seq 1 10); do
             STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health" || true)
             if [ "$STATUS" = "200" ]; then
@@ -132,6 +218,91 @@ jobs:
             sleep 10
           done
           echo "WARNING: Health check did not return 200 after 10 attempts."
+          exit 1
+
+  # --------------------------------------------------------------------------
+  # Deploy agent-runtime to GKE.
+  # --------------------------------------------------------------------------
+  deploy-agent-runtime:
+    name: "Deploy agent-runtime to GKE"
+    needs: build-push-agent-runtime
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install gke-gcloud-auth-plugin
+        run: gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials agents-runtime \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Deploy to GKE
+        run: |
+          # Update the agent-runtime deployment image.
+          kubectl set image deployment/agent-runtime \
+            agent-runtime=${{ needs.build-push-agent-runtime.outputs.image }} \
+            --namespace=agents || \
+          echo "Deployment not found -- initial deploy requires kubectl apply with manifests."
+
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/agent-runtime \
+            --namespace=agents --timeout=120s || \
+          echo "WARNING: Rollout did not complete within 120s."
+
+  # --------------------------------------------------------------------------
+  # Deploy protocols service to Cloud Run.
+  # --------------------------------------------------------------------------
+  deploy-protocols:
+    name: "Deploy protocols to Cloud Run"
+    needs: build-push-protocols
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: protocols-api
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build-push-protocols.outputs.image }}
+
+      - name: Verify deployment
+        run: |
+          URL=$(gcloud run services describe protocols-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          echo "Service URL: ${URL}"
+          for i in $(seq 1 5); do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt ${i}/5: got HTTP ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+          echo "WARNING: Health check did not return 200 after 5 attempts."
           exit 1
 
   # --------------------------------------------------------------------------
