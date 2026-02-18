@@ -1,0 +1,166 @@
+# CI -- Lint and typecheck on every pull request.
+# Runs checks for both infra/ (Pulumi IaC) and services/control-plane/ (API).
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Detect which directories changed so we only run relevant checks.
+  # --------------------------------------------------------------------------
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      infra: ${{ steps.filter.outputs.infra }}
+      control-plane: ${{ steps.filter.outputs.control-plane }}
+      supabase: ${{ steps.filter.outputs.supabase }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            infra:
+              - 'infra/**'
+            control-plane:
+              - 'services/control-plane/**'
+            supabase:
+              - 'supabase/**'
+
+  # --------------------------------------------------------------------------
+  # Infrastructure (Pulumi TypeScript)
+  # --------------------------------------------------------------------------
+  infra-check:
+    name: "Infra: lint + typecheck"
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  # --------------------------------------------------------------------------
+  # Control Plane API (Hono TypeScript)
+  # --------------------------------------------------------------------------
+  control-plane-check:
+    name: "Control Plane: lint + typecheck"
+    needs: changes
+    if: needs.changes.outputs.control-plane == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/control-plane
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/control-plane/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  # --------------------------------------------------------------------------
+  # SQL lint for Supabase migrations (basic syntax check).
+  # --------------------------------------------------------------------------
+  supabase-check:
+    name: "Supabase: validate migrations"
+    needs: changes
+    if: needs.changes.outputs.supabase == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check migration file naming convention
+        run: |
+          # Ensure all migration files follow NNNNN_name.sql pattern.
+          for f in supabase/migrations/*.sql; do
+            basename=$(basename "$f")
+            if ! echo "$basename" | grep -qE '^[0-9]{5}_[a-z_]+\.sql$'; then
+              echo "ERROR: Migration file '$basename' does not follow NNNNN_name.sql convention"
+              exit 1
+            fi
+          done
+          echo "All migration files follow naming convention."
+
+      - name: Check for common SQL issues
+        run: |
+          # Ensure no migrations use IF NOT EXISTS on types (Supabase doesn't support it well).
+          if grep -rn 'CREATE TYPE.*IF NOT EXISTS' supabase/migrations/*.sql; then
+            echo "WARNING: CREATE TYPE IF NOT EXISTS is not supported in all PG versions"
+          fi
+          # Ensure all migrations start with a comment header.
+          for f in supabase/migrations/*.sql; do
+            if ! head -1 "$f" | grep -q '^--'; then
+              echo "WARNING: $f does not start with a comment header"
+            fi
+          done
+          echo "SQL checks passed."
+
+  # --------------------------------------------------------------------------
+  # Pulumi preview on infra changes (posts diff as PR comment).
+  # --------------------------------------------------------------------------
+  pulumi-preview:
+    name: "Pulumi preview (dev)"
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - run: npm ci
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: pulumi/actions@v6
+        with:
+          command: preview
+          stack-name: dev
+          work-dir: infra
+          cloud-url: https://api.pulumi.com
+          comment-on-pr: true
+          comment-on-summary: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
