@@ -76,6 +76,21 @@ export type MemoryType = "episodic" | "semantic" | "procedural" | "reflection";
 
 export type AgentRole = "owner" | "admin" | "editor" | "viewer";
 
+export type ApprovalStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
+export type HitlTriggerType =
+  | "tool_call"
+  | "spending"
+  | "external_api"
+  | "data_mutation"
+  | "escalation"
+  | "custom";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -235,6 +250,44 @@ export interface AgentPermissionRow {
   updated_at: string;
 }
 
+export interface HitlPolicyRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  trigger_type: HitlTriggerType;
+  conditions: Record<string, unknown>;
+  auto_approve: boolean;
+  timeout_seconds: number | null;
+  is_active: boolean;
+  priority: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApprovalRequestRow {
+  id: string;
+  agent_id: string;
+  session_id: string | null;
+  policy_id: string | null;
+  owner_id: string;
+  action_type: string;
+  action_summary: string;
+  action_details: Record<string, unknown>;
+  status: ApprovalStatus;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  response_note: string | null;
+  response_data: Record<string, unknown>;
+  expires_at: string | null;
+  auto_resolve: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -370,6 +423,28 @@ export interface Database {
           user_id: string;
         };
         Update: Partial<AgentPermissionRow>;
+        Relationships: Rel[];
+      };
+      hitl_policies: {
+        Row: HitlPolicyRow;
+        Insert: Partial<HitlPolicyRow> & {
+          agent_id: string;
+          owner_id: string;
+          name: string;
+          trigger_type: HitlTriggerType;
+        };
+        Update: Partial<HitlPolicyRow>;
+        Relationships: Rel[];
+      };
+      approval_requests: {
+        Row: ApprovalRequestRow;
+        Insert: Partial<ApprovalRequestRow> & {
+          agent_id: string;
+          owner_id: string;
+          action_type: string;
+          action_summary: string;
+        };
+        Update: Partial<ApprovalRequestRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {
