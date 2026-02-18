@@ -26,6 +26,7 @@ import {
   templateVersionRoutes,
   deploymentRoutes,
 } from "./routes/templates.js";
+import { agentAnalyticsRoutes, ownerAnalyticsRoutes } from "./routes/analytics.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -67,6 +68,8 @@ app.use("/audit-logs/*", apiKeyMiddleware);
 app.use("/audit-logs", apiKeyMiddleware);
 app.use("/templates/*", apiKeyMiddleware);
 app.use("/templates", apiKeyMiddleware);
+app.use("/analytics/*", apiKeyMiddleware);
+app.use("/analytics", apiKeyMiddleware);
 
 app.use("/agents/*", authMiddleware);
 app.use("/agents", authMiddleware);
@@ -78,6 +81,8 @@ app.use("/audit-logs/*", authMiddleware);
 app.use("/audit-logs", authMiddleware);
 app.use("/templates/*", authMiddleware);
 app.use("/templates", authMiddleware);
+app.use("/analytics/*", authMiddleware);
+app.use("/analytics", authMiddleware);
 
 // Per-user rate limit on authenticated routes.
 app.use("/agents/*", userRateLimiter);
@@ -90,12 +95,17 @@ app.use("/audit-logs/*", userRateLimiter);
 app.use("/audit-logs", userRateLimiter);
 app.use("/templates/*", userRateLimiter);
 app.use("/templates", userRateLimiter);
+app.use("/analytics/*", userRateLimiter);
+app.use("/analytics", userRateLimiter);
 
 // Mount route groups.
 app.route("/agents", agentRoutes);
 app.route("/sessions", sessionRoutes);
 app.route("/feature-flags", featureFlagRoutes);
 app.route("/audit-logs", auditRoutes);
+
+// Analytics routes: owner-level dashboard (user-scoped).
+app.route("/analytics", ownerAnalyticsRoutes);
 
 // Template routes: templates and versions (user-scoped, not agent-scoped).
 app.route("/templates", templateRoutes);
@@ -119,6 +129,9 @@ app.route("/agents/:agentId/data/connectors", connectorRoutes);
 app.route("/agents/:agentId/data/pipelines", pipelineRoutes);
 app.route("/agents/:agentId/data/pipelines/:pipelineId/steps", pipelineStepRoutes);
 app.route("/agents/:agentId/data/runs", pipelineRunRoutes);
+
+// Agent-scoped analytics routes: per-agent metrics under /agents/:agentId/analytics/*.
+app.route("/agents/:agentId/analytics", agentAnalyticsRoutes);
 
 // Deployment routes: deployment lifecycle under /agents/:agentId/deployments/*.
 app.route("/agents/:agentId/deployments", deploymentRoutes);

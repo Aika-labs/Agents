@@ -149,6 +149,8 @@ export type DeploymentStatus =
   | "failed"
   | "rolled_back";
 
+export type MetricPeriod = "hourly" | "daily" | "weekly" | "monthly";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -539,6 +541,54 @@ export interface AgentDeploymentRow {
   updated_at: string;
 }
 
+export interface AgentMetricRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  period: MetricPeriod;
+  bucket_start: string;
+  bucket_end: string;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  session_count: number;
+  message_count: number;
+  estimated_cost_usd: string;
+  avg_latency_ms: string;
+  p95_latency_ms: string;
+  p99_latency_ms: string;
+  error_count: number;
+  tool_call_count: number;
+  eval_run_count: number;
+  avg_eval_score: string;
+  pipeline_run_count: number;
+  records_processed: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AgentUsageDailyRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  usage_date: string;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  session_count: number;
+  message_count: number;
+  unique_users: number;
+  estimated_cost_usd: string;
+  avg_latency_ms: string;
+  error_count: number;
+  error_rate: string;
+  tool_call_count: number;
+  top_models: unknown[];
+  top_tools: unknown[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -805,6 +855,28 @@ export interface Database {
           owner_id: string;
         };
         Update: Partial<AgentDeploymentRow>;
+        Relationships: Rel[];
+      };
+      agent_metrics: {
+        Row: AgentMetricRow;
+        Insert: Partial<AgentMetricRow> & {
+          agent_id: string;
+          owner_id: string;
+          period: MetricPeriod;
+          bucket_start: string;
+          bucket_end: string;
+        };
+        Update: Partial<AgentMetricRow>;
+        Relationships: Rel[];
+      };
+      agent_usage_daily: {
+        Row: AgentUsageDailyRow;
+        Insert: Partial<AgentUsageDailyRow> & {
+          agent_id: string;
+          owner_id: string;
+          usage_date: string;
+        };
+        Update: Partial<AgentUsageDailyRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {
