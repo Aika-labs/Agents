@@ -1,4 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import type { ServerRequest, ServerNotification } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 /**
@@ -16,9 +18,11 @@ import { z } from "zod";
  *   - get_agent_status: Get runtime status of an agent
  *   - send_message: Send a message to an agent session
  *
- * The MCP server is stateless per-request. Each tool call makes an HTTP
- * request to the control plane or runtime service.
+ * Auth: The MCP client's Authorization / X-API-Key headers are forwarded
+ * to the control plane so requests are authenticated as the calling user.
  */
+
+type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
 /** Control plane base URL (internal service). */
 function getControlPlaneUrl(): string {
@@ -28,6 +32,39 @@ function getControlPlaneUrl(): string {
 /** Agent runtime base URL (internal service). */
 function getRuntimeUrl(): string {
   return process.env["AGENT_RUNTIME_URL"] ?? "http://localhost:8081";
+}
+
+/**
+ * Extract auth-related headers from the incoming MCP request.
+ *
+ * The MCP SDK's Streamable HTTP transport populates `extra.requestInfo.headers`
+ * with the original HTTP request headers as a plain Record (IsomorphicHeaders).
+ * We forward Authorization and X-API-Key so the control plane can authenticate
+ * the caller.
+ */
+function getAuthHeaders(extra: ToolExtra): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const reqHeaders = extra.requestInfo?.headers;
+
+  if (!reqHeaders) return headers;
+
+  // IsomorphicHeaders is Record<string, string | string[] | undefined>.
+  // Header keys may be lowercase (Node.js convention).
+  const auth = reqHeaders["authorization"] ?? reqHeaders["Authorization"];
+  if (typeof auth === "string") {
+    headers["Authorization"] = auth;
+  } else if (Array.isArray(auth) && auth[0]) {
+    headers["Authorization"] = auth[0];
+  }
+
+  const apiKey = reqHeaders["x-api-key"] ?? reqHeaders["X-API-Key"];
+  if (typeof apiKey === "string") {
+    headers["X-API-Key"] = apiKey;
+  } else if (Array.isArray(apiKey) && apiKey[0]) {
+    headers["X-API-Key"] = apiKey[0];
+  }
+
+  return headers;
 }
 
 /**
@@ -78,7 +115,7 @@ function registerTools(mcp: McpServer): void {
         .describe("Filter by framework"),
       limit: z.number().int().min(1).max(100).default(20).describe("Max results"),
     },
-    async (args) => {
+    async (args, extra) => {
       const params = new URLSearchParams();
       if (args.status) params.set("status", args.status);
       if (args.framework) params.set("framework", args.framework);
@@ -86,6 +123,7 @@ function registerTools(mcp: McpServer): void {
 
       const res = await fetch(
         `${getControlPlaneUrl()}/agents?${params.toString()}`,
+        { headers: getAuthHeaders(extra) },
       );
       const data = await res.json();
 
@@ -102,9 +140,10 @@ function registerTools(mcp: McpServer): void {
     {
       agent_id: z.string().uuid().describe("Agent UUID"),
     },
-    async (args) => {
+    async (args, extra) => {
       const res = await fetch(
         `${getControlPlaneUrl()}/agents/${args.agent_id}`,
+        { headers: getAuthHeaders(extra) },
       );
 
       if (!res.ok) {
@@ -153,7 +192,7 @@ function registerTools(mcp: McpServer): void {
         .default("gpt-4o")
         .describe("Model identifier"),
     },
-    async (args) => {
+    async (args, extra) => {
       const body = {
         name: args.name,
         description: args.description,
@@ -167,7 +206,7 @@ function registerTools(mcp: McpServer): void {
 
       const res = await fetch(`${getControlPlaneUrl()}/agents`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders(extra) },
         body: JSON.stringify(body),
       });
 
@@ -198,10 +237,14 @@ function registerTools(mcp: McpServer): void {
     {
       agent_id: z.string().uuid().describe("Agent UUID to start"),
     },
-    async (args) => {
+    async (args, extra) => {
       const res = await fetch(
         `${getRuntimeUrl()}/agents/${args.agent_id}/start`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders(extra) },
+          body: "{}",
+        },
       );
 
       const data = await res.json();
@@ -219,10 +262,10 @@ function registerTools(mcp: McpServer): void {
     {
       agent_id: z.string().uuid().describe("Agent UUID to stop"),
     },
-    async (args) => {
+    async (args, extra) => {
       const res = await fetch(
         `${getRuntimeUrl()}/agents/${args.agent_id}/stop`,
-        { method: "POST" },
+        { method: "POST", headers: getAuthHeaders(extra) },
       );
 
       const data = await res.json();
@@ -240,9 +283,10 @@ function registerTools(mcp: McpServer): void {
     {
       agent_id: z.string().uuid().describe("Agent UUID"),
     },
-    async (args) => {
+    async (args, extra) => {
       const res = await fetch(
         `${getRuntimeUrl()}/agents/${args.agent_id}/status`,
+        { headers: getAuthHeaders(extra) },
       );
 
       const data = await res.json();
@@ -262,12 +306,12 @@ function registerTools(mcp: McpServer): void {
       session_id: z.string().uuid().describe("Session UUID"),
       message: z.string().min(1).describe("Message content"),
     },
-    async (args) => {
+    async (args, extra) => {
       const res = await fetch(
         `${getControlPlaneUrl()}/agents/${args.agent_id}/sessions/${args.session_id}/messages`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAuthHeaders(extra) },
           body: JSON.stringify({ content: args.message, role: "user" }),
         },
       );
