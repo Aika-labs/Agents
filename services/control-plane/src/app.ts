@@ -27,6 +27,7 @@ import {
   deploymentRoutes,
 } from "./routes/templates.js";
 import { agentAnalyticsRoutes, ownerAnalyticsRoutes } from "./routes/analytics.js";
+import { webhookRoutes, webhookDeliveryRoutes } from "./routes/webhooks.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -132,6 +133,10 @@ app.route("/agents/:agentId/data/runs", pipelineRunRoutes);
 
 // Agent-scoped analytics routes: per-agent metrics under /agents/:agentId/analytics/*.
 app.route("/agents/:agentId/analytics", agentAnalyticsRoutes);
+
+// Webhook routes: subscriptions and delivery log under /agents/:agentId/webhooks/*.
+app.route("/agents/:agentId/webhooks", webhookRoutes);
+app.route("/agents/:agentId/webhooks/:webhookId/deliveries", webhookDeliveryRoutes);
 
 // Deployment routes: deployment lifecycle under /agents/:agentId/deployments/*.
 app.route("/agents/:agentId/deployments", deploymentRoutes);
