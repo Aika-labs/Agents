@@ -28,6 +28,7 @@ import {
 } from "./routes/templates.js";
 import { agentAnalyticsRoutes, ownerAnalyticsRoutes } from "./routes/analytics.js";
 import { webhookRoutes, webhookDeliveryRoutes } from "./routes/webhooks.js";
+import { agentBatchRoutes, sessionBatchRoutes } from "./routes/batch.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -137,6 +138,10 @@ app.route("/agents/:agentId/analytics", agentAnalyticsRoutes);
 // Webhook routes: subscriptions and delivery log under /agents/:agentId/webhooks/*.
 app.route("/agents/:agentId/webhooks", webhookRoutes);
 app.route("/agents/:agentId/webhooks/:webhookId/deliveries", webhookDeliveryRoutes);
+
+// Batch routes: bulk operations for agents and sessions.
+app.route("/agents/batch", agentBatchRoutes);
+app.route("/agents/:agentId/sessions/batch", sessionBatchRoutes);
 
 // Deployment routes: deployment lifecycle under /agents/:agentId/deployments/*.
 app.route("/agents/:agentId/deployments", deploymentRoutes);
