@@ -130,6 +130,25 @@ export type PipelineStepType =
   | "branch"
   | "custom";
 
+export type TemplateCategory =
+  | "assistant"
+  | "coding"
+  | "data"
+  | "research"
+  | "customer_support"
+  | "automation"
+  | "creative"
+  | "custom";
+
+export type DeploymentStatus =
+  | "pending"
+  | "building"
+  | "deploying"
+  | "running"
+  | "stopped"
+  | "failed"
+  | "rolled_back";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -461,6 +480,65 @@ export interface PipelineRunRow {
   updated_at: string;
 }
 
+export interface AgentTemplateRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  category: TemplateCategory;
+  framework: AgentFramework;
+  model_config: Record<string, unknown>;
+  system_prompt: string | null;
+  tools: unknown[];
+  mcp_servers: unknown[];
+  a2a_config: Record<string, unknown>;
+  default_tags: string[];
+  is_public: boolean;
+  is_active: boolean;
+  use_count: number;
+  current_version: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateVersionRow {
+  id: string;
+  template_id: string;
+  version_number: number;
+  framework: AgentFramework;
+  model_config: Record<string, unknown>;
+  system_prompt: string | null;
+  tools: unknown[];
+  mcp_servers: unknown[];
+  a2a_config: Record<string, unknown>;
+  default_tags: string[];
+  changelog: string | null;
+  published_by: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AgentDeploymentRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  target: string;
+  status: DeploymentStatus;
+  agent_version: number;
+  template_id: string | null;
+  template_version: number | null;
+  config: Record<string, unknown>;
+  runtime_info: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  stopped_at: string | null;
+  error_message: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -698,6 +776,35 @@ export interface Database {
           owner_id: string;
         };
         Update: Partial<PipelineRunRow>;
+        Relationships: Rel[];
+      };
+      agent_templates: {
+        Row: AgentTemplateRow;
+        Insert: Partial<AgentTemplateRow> & {
+          owner_id: string;
+          name: string;
+        };
+        Update: Partial<AgentTemplateRow>;
+        Relationships: Rel[];
+      };
+      template_versions: {
+        Row: TemplateVersionRow;
+        Insert: Partial<TemplateVersionRow> & {
+          template_id: string;
+          version_number: number;
+          framework: AgentFramework;
+          published_by: string;
+        };
+        Update: Partial<TemplateVersionRow>;
+        Relationships: Rel[];
+      };
+      agent_deployments: {
+        Row: AgentDeploymentRow;
+        Insert: Partial<AgentDeploymentRow> & {
+          agent_id: string;
+          owner_id: string;
+        };
+        Update: Partial<AgentDeploymentRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {
