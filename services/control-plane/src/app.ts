@@ -11,6 +11,7 @@ import { agentRoutes } from "./routes/agents.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { featureFlagRoutes } from "./routes/feature-flags.js";
 import { auditRoutes } from "./routes/audit.js";
+import { memoryRoutes } from "./routes/memory.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -75,5 +76,9 @@ app.route("/agents", agentRoutes);
 app.route("/sessions", sessionRoutes);
 app.route("/feature-flags", featureFlagRoutes);
 app.route("/audit-logs", auditRoutes);
+
+// Memory routes use nested paths under /agents/:agentId/... so mount at root.
+// Auth middleware on /agents/* already covers these paths.
+app.route("/", memoryRoutes);
 
 export { app };

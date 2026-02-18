@@ -72,6 +72,8 @@ export type PricingModel =
 
 export type AuditSeverity = "info" | "warning" | "critical";
 
+export type MemoryType = "episodic" | "semantic" | "procedural" | "reflection";
+
 // -- Row types ----------------------------------------------------------------
 
 export interface AgentRow {
@@ -202,6 +204,23 @@ export interface AuditLogRow {
   created_at: string;
 }
 
+export interface AgentMemoryRow {
+  id: string;
+  agent_id: string;
+  owner_id: string;
+  content: string;
+  memory_type: MemoryType;
+  embedding: string | null;
+  session_id: string | null;
+  message_id: string | null;
+  importance: number;
+  access_count: number;
+  last_accessed_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MarketplaceListingRow {
   id: string;
   agent_id: string;
@@ -318,6 +337,16 @@ export interface Database {
           resource_type: string;
         };
         Update: Partial<AuditLogRow>;
+        Relationships: Rel[];
+      };
+      agent_memories: {
+        Row: AgentMemoryRow;
+        Insert: Partial<AgentMemoryRow> & {
+          agent_id: string;
+          owner_id: string;
+          content: string;
+        };
+        Update: Partial<AgentMemoryRow>;
         Relationships: Rel[];
       };
       marketplace_listings: {
