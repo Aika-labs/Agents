@@ -4,15 +4,15 @@ import { z } from "zod";
 import { getSupabase } from "../lib/supabase.js";
 import { parseQuery } from "../lib/validate.js";
 import type { AuditLogRow } from "../types/database.js";
-import type { AppEnv } from "../types/env.js";
 
-export const auditRoutes = new Hono<AppEnv>();
+export const auditRoutes = new Hono();
 
 // -- Zod schemas --------------------------------------------------------------
 
 const auditSeverities = ["info", "warning", "critical"] as const;
 
 const listAuditLogsQuery = z.object({
+  actor_id: z.string().uuid().optional(),
   action: z.string().max(255).optional(),
   resource_type: z.string().max(255).optional(),
   resource_id: z.string().uuid().optional(),
@@ -27,19 +27,18 @@ const listAuditLogsQuery = z.object({
 
 // -- Routes -------------------------------------------------------------------
 
-/** GET / -- Query audit logs for the authenticated user. */
+/** GET / -- Query audit logs with filtering. */
 auditRoutes.get("/", async (c) => {
-  const user = c.get("user");
   const query = parseQuery(listAuditLogsQuery, c.req.query());
   const db = getSupabase();
 
   let q = db
     .from("audit_logs")
     .select("*", { count: "exact" })
-    .eq("actor_id", user.id)
     .order("created_at", { ascending: false })
     .range(query.offset, query.offset + query.limit - 1);
 
+  if (query.actor_id) q = q.eq("actor_id", query.actor_id);
   if (query.action) q = q.eq("action", query.action);
   if (query.resource_type) q = q.eq("resource_type", query.resource_type);
   if (query.resource_id) q = q.eq("resource_id", query.resource_id);
@@ -63,9 +62,8 @@ auditRoutes.get("/", async (c) => {
   });
 });
 
-/** GET /:id -- Get a single audit log entry (must belong to user). */
+/** GET /:id -- Get a single audit log entry. */
 auditRoutes.get("/:id", async (c) => {
-  const user = c.get("user");
   const id = c.req.param("id");
   const db = getSupabase();
 
@@ -73,7 +71,6 @@ auditRoutes.get("/:id", async (c) => {
     .from("audit_logs")
     .select()
     .eq("id", id)
-    .eq("actor_id", user.id)
     .single();
 
   if (error || !data) {
