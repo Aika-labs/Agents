@@ -18,7 +18,7 @@ import { createRunner } from "../frameworks/registry.js";
  *     state should live in Supabase / Redis.
  *
  * When stronger isolation is needed (Phase 2), swap this implementation for
- * the K8s-based LifecycleManager in `src/k8s/lifecycle.ts` — the public API
+ * the K8s-based LifecycleManager in `src/k8s-reference/` — the public API
  * is identical.
  */
 
