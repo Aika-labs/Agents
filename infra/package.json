@@ -1,0 +1,19 @@
+{
+    "name": "agents-platform",
+    "main": "index.ts",
+    "devDependencies": {
+        "@types/node": "^18",
+        "@typescript-eslint/eslint-plugin": "^8",
+        "@typescript-eslint/parser": "^8",
+        "eslint": "^8",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "@pulumi/gcp": "^9.0.0",
+        "@pulumi/pulumi": "^3.113.0"
+    },
+    "scripts": {
+        "lint": "eslint 'index.ts' '**/*.ts' --ignore-pattern 'node_modules' --ignore-pattern 'bin'",
+        "typecheck": "tsc --noEmit"
+    }
+}

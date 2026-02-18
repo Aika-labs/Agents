@@ -1,0 +1,13 @@
+# Supabase project configuration.
+# See https://supabase.com/docs/guides/cli/config for full reference.
+
+[project]
+id = "" # Set via: supabase link --project-ref <ref>
+
+[db]
+major_version = 15
+
+[db.pooler]
+enabled = true
+default_pool_size = 15
+max_client_conn = 100
