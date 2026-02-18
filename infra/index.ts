@@ -1,5 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as gcp from "@pulumi/gcp";
+import * as k8s from "@pulumi/kubernetes";
 
 // ---------------------------------------------------------------------------
 // Configuration -- all values parameterized for multi-environment support.
@@ -64,6 +65,32 @@ const subnet = new gcp.compute.Subnetwork("agents-subnet", {
 });
 
 // ---------------------------------------------------------------------------
+// Networking -- Cloud Router + Cloud NAT for outbound internet access.
+// GKE private nodes need NAT to pull external images and reach APIs.
+// ---------------------------------------------------------------------------
+
+const router = new gcp.compute.Router(
+    "agents-router",
+    {
+        region: gcpRegion,
+        network: network.id,
+        description: "Cloud Router for NAT gateway",
+    },
+    { dependsOn: enabledApis },
+);
+
+new gcp.compute.RouterNat("agents-nat", {
+    router: router.name,
+    region: gcpRegion,
+    natIpAllocateOption: "AUTO_ONLY",
+    sourceSubnetworkIpRangesToNat: "ALL_SUBNETWORKS_ALL_IP_RANGES",
+    logConfig: {
+        enable: true,
+        filter: "ERRORS_ONLY",
+    },
+});
+
+// ---------------------------------------------------------------------------
 // IAM -- dedicated service accounts with least-privilege.
 // ---------------------------------------------------------------------------
 
@@ -120,6 +147,32 @@ agentRuntimeRoles.forEach(
             project: gcpProject,
             role,
             member: pulumi.interpolate`serviceAccount:${agentRuntimeSa.email}`,
+        }),
+);
+
+// Protocols service account -- runs the MCP + A2A protocol gateway.
+const protocolsSa = new gcp.serviceaccount.Account(
+    "protocols-sa",
+    {
+        accountId: `agents-proto-${environment}`,
+        displayName: "Agents Protocols Service Account",
+        description:
+            "Service account for the Protocols service (MCP + A2A on Cloud Run)",
+    },
+    { dependsOn: enabledApis },
+);
+
+const protocolsRoles = [
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+];
+
+protocolsRoles.forEach(
+    (role) =>
+        new gcp.projects.IAMMember(`proto-role-${role.split("/")[1]}`, {
+            project: gcpProject,
+            role,
+            member: pulumi.interpolate`serviceAccount:${protocolsSa.email}`,
         }),
 );
 
@@ -201,14 +254,77 @@ const controlPlaneService = new gcp.cloudrunv2.Service(
     { dependsOn: enabledApis },
 );
 
-// Allow unauthenticated access to the control plane API (public endpoint).
-// In production, this would be behind an API gateway / IAP.
-new gcp.cloudrunv2.ServiceIamMember("control-plane-public-access", {
-    name: controlPlaneService.name,
-    location: gcpRegion,
-    role: "roles/run.invoker",
-    member: "allUsers",
-});
+// Allow unauthenticated access to the control plane API in non-prod.
+// Production should use IAP or an API gateway instead of allUsers.
+if (environment !== "prod") {
+    new gcp.cloudrunv2.ServiceIamMember("control-plane-public-access", {
+        name: controlPlaneService.name,
+        location: gcpRegion,
+        role: "roles/run.invoker",
+        member: "allUsers",
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Cloud Run v2 -- Protocols service (MCP + A2A gateway).
+// Uses a placeholder image; the real image is deployed via CI/CD.
+// ---------------------------------------------------------------------------
+
+const protocolsService = new gcp.cloudrunv2.Service(
+    "protocols-api",
+    {
+        location: gcpRegion,
+        description: "Agent Operating System - Protocols Service (MCP + A2A)",
+        ingress: "INGRESS_TRAFFIC_ALL",
+        deletionProtection: false,
+        labels: commonLabels,
+        template: {
+            serviceAccount: protocolsSa.email,
+            scaling: {
+                minInstanceCount: 0,
+                maxInstanceCount: 5,
+            },
+            containers: [
+                {
+                    // Placeholder image -- replaced by CI/CD pipeline.
+                    image: "us-docker.pkg.dev/cloudrun/container/hello",
+                    ports: { containerPort: 8082 },
+                    resources: {
+                        limits: {
+                            cpu: "1",
+                            memory: "512Mi",
+                        },
+                    },
+                    envs: [
+                        { name: "NODE_ENV", value: "production" },
+                        { name: "ENVIRONMENT", value: environment },
+                        { name: "PORT", value: "8082" },
+                    ],
+                },
+            ],
+            vpcAccess: {
+                networkInterfaces: [
+                    {
+                        network: network.name,
+                        subnetwork: subnet.name,
+                    },
+                ],
+            },
+        },
+    },
+    { dependsOn: enabledApis },
+);
+
+// The protocols service needs to be reachable by other agents and services.
+// In production, restrict access via IAP or service-to-service auth.
+if (environment !== "prod") {
+    new gcp.cloudrunv2.ServiceIamMember("protocols-public-access", {
+        name: protocolsService.name,
+        location: gcpRegion,
+        role: "roles/run.invoker",
+        member: "allUsers",
+    });
+}
 
 // ---------------------------------------------------------------------------
 // Data Layer -- Redis for real-time agent state & pub/sub.
@@ -273,12 +389,8 @@ const supabaseUrlSecret = new gcp.secretmanager.Secret(
     { dependsOn: enabledApis },
 );
 
-// Placeholder version -- the real value is set via:
+// Secret versions are managed outside Pulumi via:
 //   gcloud secrets versions add <secret-id> --data-file=-
-new gcp.secretmanager.SecretVersion("supabase-url-placeholder", {
-    secret: supabaseUrlSecret.id,
-    secretData: "PLACEHOLDER_SET_VIA_CLI",
-});
 
 const supabaseKeySecret = new gcp.secretmanager.Secret(
     "supabase-service-key",
@@ -289,11 +401,6 @@ const supabaseKeySecret = new gcp.secretmanager.Secret(
     },
     { dependsOn: enabledApis },
 );
-
-new gcp.secretmanager.SecretVersion("supabase-key-placeholder", {
-    secret: supabaseKeySecret.id,
-    secretData: "PLACEHOLDER_SET_VIA_CLI",
-});
 
 // ---------------------------------------------------------------------------
 // Agent Runtime -- GKE Autopilot cluster.
@@ -329,6 +436,152 @@ const gkeCluster = new gcp.container.Cluster(
         ipAllocationPolicy: {},
     },
     { dependsOn: enabledApis },
+);
+
+// ---------------------------------------------------------------------------
+// GKE Workloads -- Kubernetes provider, namespace, service account, and
+// base deployment for the agent runtime.
+// ---------------------------------------------------------------------------
+
+const k8sProvider = new k8s.Provider("gke-provider", {
+    kubeconfig: pulumi
+        .all([gkeCluster.name, gkeCluster.endpoint, gkeCluster.masterAuth])
+        .apply(([name, endpoint, auth]) => {
+            const caCert = auth.clusterCaCertificate;
+            return JSON.stringify({
+                apiVersion: "v1",
+                kind: "Config",
+                clusters: [
+                    {
+                        name,
+                        cluster: {
+                            server: `https://${endpoint}`,
+                            "certificate-authority-data": caCert,
+                        },
+                    },
+                ],
+                contexts: [
+                    {
+                        name,
+                        context: { cluster: name, user: name },
+                    },
+                ],
+                "current-context": name,
+                users: [
+                    {
+                        name,
+                        user: {
+                            exec: {
+                                apiVersion:
+                                    "client.authentication.k8s.io/v1beta1",
+                                command: "gke-gcloud-auth-plugin",
+                                installHint:
+                                    "Install gke-gcloud-auth-plugin for kubectl auth.",
+                            },
+                        },
+                    },
+                ],
+            });
+        }),
+});
+
+const agentsNamespace = new k8s.core.v1.Namespace(
+    "agents-ns",
+    {
+        metadata: {
+            name: "agents",
+            labels: commonLabels,
+        },
+    },
+    { provider: k8sProvider },
+);
+
+// Kubernetes service account annotated for Workload Identity so pods can
+// impersonate the GCP agent-runtime service account.
+const k8sAgentSa = new k8s.core.v1.ServiceAccount(
+    "agent-runtime-k8s-sa",
+    {
+        metadata: {
+            name: "agent-runtime",
+            namespace: agentsNamespace.metadata.name,
+            annotations: {
+                "iam.gke.io/gcp-service-account": agentRuntimeSa.email,
+            },
+            labels: commonLabels,
+        },
+    },
+    { provider: k8sProvider },
+);
+
+// Allow the K8s SA to impersonate the GCP SA via Workload Identity.
+new gcp.serviceaccount.IAMMember("agent-runtime-wi-binding", {
+    serviceAccountId: agentRuntimeSa.name,
+    role: "roles/iam.workloadIdentityUser",
+    member: pulumi.interpolate`serviceAccount:${gcpProject}.svc.id.goog[agents/agent-runtime]`,
+});
+
+// Base deployment for the agent runtime. Uses a placeholder image that
+// CI/CD replaces with `kubectl set image`.
+new k8s.apps.v1.Deployment(
+    "agent-runtime-deploy",
+    {
+        metadata: {
+            name: "agent-runtime",
+            namespace: agentsNamespace.metadata.name,
+            labels: { ...commonLabels, app: "agent-runtime" },
+        },
+        spec: {
+            replicas: 1,
+            selector: {
+                matchLabels: { app: "agent-runtime" },
+            },
+            template: {
+                metadata: {
+                    labels: { app: "agent-runtime", ...commonLabels },
+                },
+                spec: {
+                    serviceAccountName: k8sAgentSa.metadata.name,
+                    containers: [
+                        {
+                            name: "agent-runtime",
+                            // Placeholder -- CI/CD updates this image.
+                            image: "us-docker.pkg.dev/cloudrun/container/hello",
+                            ports: [{ containerPort: 8081 }],
+                            resources: {
+                                requests: { cpu: "250m", memory: "256Mi" },
+                                limits: { cpu: "1", memory: "512Mi" },
+                            },
+                            env: [
+                                {
+                                    name: "NODE_ENV",
+                                    value: "production",
+                                },
+                                {
+                                    name: "ENVIRONMENT",
+                                    value: environment,
+                                },
+                                {
+                                    name: "PORT",
+                                    value: "8081",
+                                },
+                            ],
+                            livenessProbe: {
+                                httpGet: { path: "/health", port: 8081 },
+                                initialDelaySeconds: 15,
+                                periodSeconds: 30,
+                            },
+                            readinessProbe: {
+                                httpGet: { path: "/health", port: 8081 },
+                                initialDelaySeconds: 5,
+                                periodSeconds: 10,
+                            },
+                        },
+                    ],
+                },
+            },
+        },
+    },
+    { provider: k8sProvider },
 );
 
 // ---------------------------------------------------------------------------
@@ -474,6 +727,8 @@ export const subnetName = subnet.name;
 export const controlPlaneUrl = controlPlaneService.uri;
 export const controlPlaneServiceAccount = controlPlaneSa.email;
 export const agentRuntimeServiceAccount = agentRuntimeSa.email;
+export const protocolsServiceAccount = protocolsSa.email;
+export const protocolsUrl = protocolsService.uri;
 export const containerRegistryUrl = containerRepo.registryUri;
 export const redisHost = redisInstance.host;
 export const redisPort = redisInstance.port;
