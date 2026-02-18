@@ -21,6 +21,11 @@ import {
   pipelineStepRoutes,
   pipelineRunRoutes,
 } from "./routes/pipelines.js";
+import {
+  templateRoutes,
+  templateVersionRoutes,
+  deploymentRoutes,
+} from "./routes/templates.js";
 import { healthRoutes } from "./routes/health.js";
 import type { AppEnv } from "./types/env.js";
 
@@ -60,6 +65,8 @@ app.use("/feature-flags/*", apiKeyMiddleware);
 app.use("/feature-flags", apiKeyMiddleware);
 app.use("/audit-logs/*", apiKeyMiddleware);
 app.use("/audit-logs", apiKeyMiddleware);
+app.use("/templates/*", apiKeyMiddleware);
+app.use("/templates", apiKeyMiddleware);
 
 app.use("/agents/*", authMiddleware);
 app.use("/agents", authMiddleware);
@@ -69,6 +76,8 @@ app.use("/feature-flags/*", authMiddleware);
 app.use("/feature-flags", authMiddleware);
 app.use("/audit-logs/*", authMiddleware);
 app.use("/audit-logs", authMiddleware);
+app.use("/templates/*", authMiddleware);
+app.use("/templates", authMiddleware);
 
 // Per-user rate limit on authenticated routes.
 app.use("/agents/*", userRateLimiter);
@@ -79,12 +88,18 @@ app.use("/feature-flags/*", userRateLimiter);
 app.use("/feature-flags", userRateLimiter);
 app.use("/audit-logs/*", userRateLimiter);
 app.use("/audit-logs", userRateLimiter);
+app.use("/templates/*", userRateLimiter);
+app.use("/templates", userRateLimiter);
 
 // Mount route groups.
 app.route("/agents", agentRoutes);
 app.route("/sessions", sessionRoutes);
 app.route("/feature-flags", featureFlagRoutes);
 app.route("/audit-logs", auditRoutes);
+
+// Template routes: templates and versions (user-scoped, not agent-scoped).
+app.route("/templates", templateRoutes);
+app.route("/templates/:templateId/versions", templateVersionRoutes);
 
 // Permissions routes: /agents/:agentId/permissions/*
 // Auth middleware on /agents/* already covers these paths.
@@ -104,6 +119,9 @@ app.route("/agents/:agentId/data/connectors", connectorRoutes);
 app.route("/agents/:agentId/data/pipelines", pipelineRoutes);
 app.route("/agents/:agentId/data/pipelines/:pipelineId/steps", pipelineStepRoutes);
 app.route("/agents/:agentId/data/runs", pipelineRunRoutes);
+
+// Deployment routes: deployment lifecycle under /agents/:agentId/deployments/*.
+app.route("/agents/:agentId/deployments", deploymentRoutes);
 
 // Memory routes use nested paths under /agents/:agentId/... so mount at root.
 // Auth middleware on /agents/* already covers these paths.
