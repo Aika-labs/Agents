@@ -2,6 +2,10 @@ import type { AgentRunner } from "./runner.js";
 import type { AgentFramework } from "./types.js";
 import { GoogleADKAdapter } from "./google-adk.js";
 import { LangGraphAdapter } from "./langgraph.js";
+import { CrewAIAdapter } from "./crewai.js";
+import { AutoGenAdapter } from "./autogen.js";
+import { OpenAISDKAdapter } from "./openai-sdk.js";
+import { CustomAdapter } from "./custom.js";
 
 /**
  * Framework adapter registry.
@@ -15,11 +19,10 @@ type AdapterFactory = () => AgentRunner;
 const adapters: Record<string, AdapterFactory> = {
   google_adk: () => new GoogleADKAdapter(),
   langgraph: () => new LangGraphAdapter(),
-  // Future adapters:
-  // crewai: () => new CrewAIAdapter(),
-  // autogen: () => new AutoGenAdapter(),
-  // openai_sdk: () => new OpenAISDKAdapter(),
-  // custom: () => new CustomAdapter(),
+  crewai: () => new CrewAIAdapter(),
+  autogen: () => new AutoGenAdapter(),
+  openai_sdk: () => new OpenAISDKAdapter(),
+  custom: () => new CustomAdapter(),
 };
 
 /**
