@@ -534,6 +534,85 @@ new gcp.monitoring.AlertPolicy("control-plane-errors", {
 });
 
 // ---------------------------------------------------------------------------
+// Cloud Run v2 -- Dashboard (Next.js frontend).
+// Serves the Agent OS web UI. Uses a placeholder image; CI/CD deploys the
+// real image via `gcloud run deploy`.
+// ---------------------------------------------------------------------------
+
+const dashboardSa = new gcp.serviceaccount.Account(
+    "dashboard-sa",
+    {
+        accountId: `agents-dash-${environment}`,
+        displayName: "Agents Dashboard Service Account",
+        description:
+            "Service account for the Dashboard frontend (Cloud Run)",
+    },
+    { dependsOn: enabledApis },
+);
+
+// Dashboard only needs logging -- it talks to the control plane over HTTP.
+const dashboardRoles = [
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+];
+
+dashboardRoles.forEach(
+    (role) =>
+        new gcp.projects.IAMMember(`dash-role-${role.split("/")[1]}`, {
+            project: gcpProject,
+            role,
+            member: pulumi.interpolate`serviceAccount:${dashboardSa.email}`,
+        }),
+);
+
+const dashboardService = new gcp.cloudrunv2.Service(
+    "dashboard",
+    {
+        location: gcpRegion,
+        description: "Agent Operating System - Dashboard (Next.js)",
+        ingress: "INGRESS_TRAFFIC_ALL",
+        deletionProtection: false,
+        labels: commonLabels,
+        template: {
+            serviceAccount: dashboardSa.email,
+            scaling: {
+                minInstanceCount: 0,
+                maxInstanceCount: 5,
+            },
+            containers: [
+                {
+                    // Placeholder image -- replaced by CI/CD pipeline.
+                    image: "us-docker.pkg.dev/cloudrun/container/hello",
+                    ports: { containerPort: 3000 },
+                    resources: {
+                        limits: {
+                            cpu: "1",
+                            memory: "512Mi",
+                        },
+                    },
+                    envs: [
+                        { name: "NODE_ENV", value: "production" },
+                        { name: "HOSTNAME", value: "0.0.0.0" },
+                        { name: "PORT", value: "3000" },
+                    ],
+                },
+            ],
+        },
+    },
+    { dependsOn: enabledApis },
+);
+
+// Allow unauthenticated access to the dashboard in non-prod.
+if (environment !== "prod") {
+    new gcp.cloudrunv2.ServiceIamMember("dashboard-public-access", {
+        name: dashboardService.name,
+        location: gcpRegion,
+        role: "roles/run.invoker",
+        member: "allUsers",
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -548,6 +627,8 @@ export const agentRuntimeServiceAccount = agentRuntimeSa.email;
 export const agentRuntimeUrl = agentRuntimeService.uri;
 export const protocolsServiceAccount = protocolsSa.email;
 export const protocolsUrl = protocolsService.uri;
+export const dashboardUrl = dashboardService.uri;
+export const dashboardServiceAccount = dashboardSa.email;
 export const containerRegistryUrl = containerRepo.registryUri;
 export const redisHost = redisInstance.host;
 export const redisPort = redisInstance.port;
