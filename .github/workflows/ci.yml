@@ -25,6 +25,7 @@ jobs:
       control-plane: ${{ steps.filter.outputs.control-plane }}
       agent-runtime: ${{ steps.filter.outputs.agent-runtime }}
       protocols: ${{ steps.filter.outputs.protocols }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
       supabase: ${{ steps.filter.outputs.supabase }}
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +41,8 @@ jobs:
               - 'services/agent-runtime/**'
             protocols:
               - 'services/protocols/**'
+            dashboard:
+              - 'dashboard/**'
             supabase:
               - 'supabase/**'
 
@@ -121,7 +124,7 @@ jobs:
   # Protocols Service (Hono + Express TypeScript)
   # --------------------------------------------------------------------------
   protocols-check:
-    name: "Protocols: lint + typecheck"
+    name: "Protocols: lint + typecheck + test"
     needs: changes
     if: needs.changes.outputs.protocols == 'true'
     runs-on: ubuntu-latest
@@ -140,6 +143,32 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm test
+
+  # --------------------------------------------------------------------------
+  # Dashboard (Next.js TypeScript)
+  # --------------------------------------------------------------------------
+  dashboard-check:
+    name: "Dashboard: lint + typecheck + build"
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
 
   # --------------------------------------------------------------------------
   # SQL lint for Supabase migrations (basic syntax check).

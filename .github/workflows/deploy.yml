@@ -1,6 +1,6 @@
 # Deploy -- Build, push, and deploy on merge to main.
 # Handles Docker image build + push to Artifact Registry, Cloud Run deploy,
-# GKE deploy, and Supabase migrations.
+# and Supabase migrations.
 
 name: Deploy
 
@@ -28,6 +28,7 @@ jobs:
       control-plane: ${{ steps.filter.outputs.control-plane }}
       agent-runtime: ${{ steps.filter.outputs.agent-runtime }}
       protocols: ${{ steps.filter.outputs.protocols }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
       supabase: ${{ steps.filter.outputs.supabase }}
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +45,8 @@ jobs:
               - 'services/agent-runtime/**'
             protocols:
               - 'services/protocols/**'
+            dashboard:
+              - 'dashboard/**'
             supabase:
               - 'supabase/**'
 
@@ -196,11 +199,32 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve runtime URLs
+        id: urls
+        run: |
+          RT_URL=$(gcloud run services describe agent-runtime-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)' 2>/dev/null || echo "")
+          echo "runtime_url=${RT_URL}" >> "$GITHUB_OUTPUT"
+
       - uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: control-plane-api
           region: ${{ env.GCP_REGION }}
           image: ${{ needs.build-push-control-plane.outputs.image }}
+          env_vars: |
+            NODE_ENV=production
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            GCP_PROJECT=${{ secrets.GCP_PROJECT_ID }}
+            GCP_REGION=${{ env.GCP_REGION }}
+            AGENT_RUNTIME_URL=${{ steps.urls.outputs.runtime_url }}
+          secrets: |
+            SUPABASE_URL=agents-supabase-url-${{ env.ENVIRONMENT }}:latest
+            SUPABASE_SERVICE_ROLE_KEY=agents-supabase-key-${{ env.ENVIRONMENT }}:latest
+          flags: |
+            --vpc-connector=projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/connectors/agents-vpc
 
       - name: Verify deployment
         run: |
@@ -221,18 +245,16 @@ jobs:
           exit 1
 
   # --------------------------------------------------------------------------
-  # Deploy agent-runtime to GKE.
+  # Deploy agent-runtime to Cloud Run.
   # --------------------------------------------------------------------------
   deploy-agent-runtime:
-    name: "Deploy agent-runtime to GKE"
+    name: "Deploy agent-runtime to Cloud Run"
     needs: build-push-agent-runtime
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -241,28 +263,40 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Install gke-gcloud-auth-plugin
-        run: gcloud components install gke-gcloud-auth-plugin --quiet
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: agent-runtime-api
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build-push-agent-runtime.outputs.image }}
+          env_vars: |
+            NODE_ENV=production
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            PORT=8081
+            GCP_PROJECT=${{ secrets.GCP_PROJECT_ID }}
+            GCP_REGION=${{ env.GCP_REGION }}
+          secrets: |
+            SUPABASE_URL=agents-supabase-url-${{ env.ENVIRONMENT }}:latest
+            SUPABASE_SERVICE_ROLE_KEY=agents-supabase-key-${{ env.ENVIRONMENT }}:latest
+          flags: |
+            --vpc-connector=projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/connectors/agents-vpc
 
-      - name: Get GKE credentials
+      - name: Verify deployment
         run: |
-          gcloud container clusters get-credentials agents-runtime \
+          URL=$(gcloud run services describe agent-runtime-api \
             --region=${{ env.GCP_REGION }} \
-            --project=${{ secrets.GCP_PROJECT_ID }}
-
-      - name: Deploy to GKE
-        run: |
-          # Update the agent-runtime deployment image.
-          kubectl set image deployment/agent-runtime \
-            agent-runtime=${{ needs.build-push-agent-runtime.outputs.image }} \
-            --namespace=agents || \
-          echo "Deployment not found -- initial deploy requires kubectl apply with manifests."
-
-      - name: Verify rollout
-        run: |
-          kubectl rollout status deployment/agent-runtime \
-            --namespace=agents --timeout=120s || \
-          echo "WARNING: Rollout did not complete within 120s."
+            --format='value(status.url)')
+          echo "Service URL: ${URL}"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt ${i}/10: got HTTP ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+          echo "WARNING: Health check did not return 200 after 10 attempts."
+          exit 1
 
   # --------------------------------------------------------------------------
   # Deploy protocols service to Cloud Run.
@@ -281,11 +315,35 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve service URLs
+        id: urls
+        run: |
+          CP_URL=$(gcloud run services describe control-plane-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)' 2>/dev/null || echo "")
+          RT_URL=$(gcloud run services describe agent-runtime-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)' 2>/dev/null || echo "")
+          echo "cp_url=${CP_URL}" >> "$GITHUB_OUTPUT"
+          echo "rt_url=${RT_URL}" >> "$GITHUB_OUTPUT"
+
       - uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: protocols-api
           region: ${{ env.GCP_REGION }}
           image: ${{ needs.build-push-protocols.outputs.image }}
+          env_vars: |
+            NODE_ENV=production
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            PORT=8082
+            CONTROL_PLANE_URL=${{ steps.urls.outputs.cp_url }}
+            AGENT_RUNTIME_URL=${{ steps.urls.outputs.rt_url }}
+          secrets: |
+            INTERNAL_API_KEY=agents-internal-api-key-${{ env.ENVIRONMENT }}:latest
+          flags: |
+            --vpc-connector=projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/connectors/agents-vpc
 
       - name: Verify deployment
         run: |
@@ -303,6 +361,111 @@ jobs:
             sleep 10
           done
           echo "WARNING: Health check did not return 200 after 5 attempts."
+          exit 1
+
+  # --------------------------------------------------------------------------
+  # Build & push dashboard Docker image.
+  # --------------------------------------------------------------------------
+  build-push-dashboard:
+    name: "Build & push dashboard"
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          REPO="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/agents-${{ env.ENVIRONMENT }}/dashboard"
+          SHA_TAG="${REPO}:${{ github.sha }}"
+          LATEST_TAG="${REPO}:latest"
+          echo "image=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve control plane URL
+        id: urls
+        run: |
+          CP_URL=$(gcloud run services describe control-plane-api \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)' 2>/dev/null || echo "")
+          echo "cp_url=${CP_URL}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: dashboard
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.sha_tag }}
+            ${{ steps.meta.outputs.latest_tag }}
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+            NEXT_PUBLIC_API_URL=${{ steps.urls.outputs.cp_url }}
+          cache-from: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.repo }}:buildcache,mode=max
+
+  # --------------------------------------------------------------------------
+  # Deploy dashboard to Cloud Run.
+  # --------------------------------------------------------------------------
+  deploy-dashboard:
+    name: "Deploy dashboard to Cloud Run"
+    needs: build-push-dashboard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: dashboard
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build-push-dashboard.outputs.image }}
+          env_vars: |
+            NODE_ENV=production
+            HOSTNAME=0.0.0.0
+            PORT=3000
+
+      - name: Verify deployment
+        run: |
+          URL=$(gcloud run services describe dashboard \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          echo "Dashboard URL: ${URL}"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${URL}" || true)
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "307" ]; then
+              echo "Dashboard is responding."
+              exit 0
+            fi
+            echo "Attempt ${i}/10: got HTTP ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+          echo "WARNING: Dashboard did not respond after 10 attempts."
           exit 1
 
   # --------------------------------------------------------------------------

@@ -19,13 +19,13 @@ healthRoutes.get("/", (c) => {
   });
 });
 
-// -- GET /live -- Kubernetes liveness probe. ----------------------------------
+// -- GET /live -- Liveness probe (Cloud Run startup check). -------------------
 
 healthRoutes.get("/live", (c) => {
   return c.json({ status: "ok" });
 });
 
-// -- GET /ready -- Kubernetes readiness probe. --------------------------------
+// -- GET /ready -- Readiness probe (dependency health). -----------------------
 
 healthRoutes.get("/ready", async (c) => {
   const checks: Record<string, DependencyCheck> = {};

@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { agentRuntimeRoutes } from "./routes/agents.js";
 import { subscribeToCommands } from "./redis/events.js";
-import { LifecycleManager } from "./k8s/lifecycle.js";
+import { lifecycle } from "./lifecycle/instance.js";
 import type { AgentCommand } from "./redis/events.js";
+import type { AgentConfig } from "./frameworks/types.js";
 
 const app = new Hono();
 
@@ -45,13 +46,11 @@ app.onError((err, c) => {
  * Start the Redis command subscriber.
  *
  * Listens for agent lifecycle commands published by the control plane
- * and dispatches them to the LifecycleManager. This runs alongside
- * the HTTP server so the runtime can receive commands via both
- * HTTP API and Redis pub/sub.
+ * and dispatches them to the InProcessLifecycleManager.  This runs
+ * alongside the HTTP server so the runtime can receive commands via
+ * both HTTP API and Redis pub/sub.
  */
 export function startCommandSubscriber(): { unsubscribe: () => Promise<void> } {
-  const lifecycle = new LifecycleManager();
-
   const handleCommand = async (cmd: AgentCommand): Promise<void> => {
     console.log(
       `[Subscriber] Received ${cmd.command} for agent ${cmd.agentId}`,
@@ -59,9 +58,9 @@ export function startCommandSubscriber(): { unsubscribe: () => Promise<void> } {
 
     switch (cmd.command) {
       case "start":
-        // Start requires full config in payload.
+        // Start requires full agent config in the payload.
         if (cmd.payload && typeof cmd.payload === "object") {
-          await lifecycle.startAgent(cmd.payload as unknown as Parameters<typeof lifecycle.startAgent>[0]);
+          await lifecycle.startAgent(cmd.payload as unknown as AgentConfig);
         } else {
           console.error("[Subscriber] Start command missing agent config in payload");
         }
@@ -79,10 +78,17 @@ export function startCommandSubscriber(): { unsubscribe: () => Promise<void> } {
         await lifecycle.killAgent(cmd.agentId);
         break;
       case "update_model":
-        // Model hot-swap is handled at the agent container level, not K8s.
-        console.log(
-          `[Subscriber] Model update for ${cmd.agentId} -- forwarding to agent container`,
-        );
+        if (cmd.payload && typeof cmd.payload === "object") {
+          const success = await lifecycle.updateModelConfig(
+            cmd.agentId,
+            cmd.payload as unknown as AgentConfig["modelConfig"],
+          );
+          console.log(
+            `[Subscriber] Model update for ${cmd.agentId}: ${success ? "success" : "failed"}`,
+          );
+        } else {
+          console.error("[Subscriber] update_model command missing model config in payload");
+        }
         break;
     }
   };
