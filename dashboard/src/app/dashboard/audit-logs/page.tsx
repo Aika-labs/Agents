@@ -52,12 +52,14 @@ export default function AuditLogsPage() {
       const res = await auditLogs.list(params);
       setLogs(res.data);
       setTotal(res.total);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [offset, severityFilter, actionFilter, resourceTypeFilter, sinceFilter, untilFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   // Reset offset when filters change.
   useEffect(() => { setOffset(0); }, [severityFilter, actionFilter, resourceTypeFilter, sinceFilter, untilFilter]);

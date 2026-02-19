@@ -53,11 +53,13 @@ export default function DashboardPage() {
         if (topRes.status === "fulfilled") setTopAgentsList(topRes.value.data);
         if (logsRes.status === "fulfilled") setRecentLogs(logsRes.value.data);
         if (summaryRes.status === "fulfilled") setSummary(summaryRes.value);
+      } catch {
+        // API unreachable (demo mode or backend down) -- render empty state.
       } finally {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, []);
 
   // Count agents by status.

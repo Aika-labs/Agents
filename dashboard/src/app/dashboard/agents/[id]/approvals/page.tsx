@@ -43,12 +43,14 @@ export default function ApprovalsPage() {
       ]);
       setApprovalList(a.data);
       setPolicies(p.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId, statusFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleResolve(approvalId: string, status: "approved" | "rejected") {
     await approvals.resolve(agentId, approvalId, { status });

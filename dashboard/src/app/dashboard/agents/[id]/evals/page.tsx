@@ -39,12 +39,14 @@ export default function EvalsPage() {
       ]);
       setSuites(s.data);
       setRuns(r.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleTrigger(suiteId: string) {
     setTriggering(suiteId);

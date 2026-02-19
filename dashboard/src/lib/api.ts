@@ -39,14 +39,16 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 // -- Core fetch helper --------------------------------------------------------
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  const supabase = createClient();
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  const supabase = createClient();
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
   }
   return headers;
 }
@@ -63,15 +65,26 @@ class ApiError extends Error {
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: { ...headers, ...init?.headers },
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new ApiError(res.status, body);
+
+  // Use a 5-second timeout so the UI doesn't hang when the backend is
+  // unreachable (e.g. demo mode on Vercel with no control-plane running).
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { ...headers, ...init?.headers },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new ApiError(res.status, body);
+    }
+    return res.json() as Promise<T>;
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json() as Promise<T>;
 }
 
 function qs(params: Record<string, string | number | boolean | undefined>): string {

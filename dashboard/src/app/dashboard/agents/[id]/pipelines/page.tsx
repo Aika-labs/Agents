@@ -41,12 +41,14 @@ export default function PipelinesPage() {
       setConnectorList(c.data);
       setPipelineList(p.data);
       setRunList(r.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleTrigger(pipelineId: string) {
     setTriggering(pipelineId);

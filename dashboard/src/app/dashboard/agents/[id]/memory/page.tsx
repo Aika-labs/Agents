@@ -38,12 +38,14 @@ export default function MemoryPage() {
       if (typeFilter !== "all") p.memory_type = typeFilter;
       const res = await memory.list(agentId, p);
       setMemories(res.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId, typeFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleDelete(memoryId: string) {
     if (!confirm("Delete this memory?")) return;

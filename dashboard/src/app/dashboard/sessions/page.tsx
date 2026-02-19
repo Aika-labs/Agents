@@ -36,12 +36,14 @@ export default function SessionsPage() {
       if (agentFilter.trim()) params.agent_id = agentFilter.trim();
       const res = await sessions.list(params);
       setSessionList(res.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [statusFilter, agentFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   return (
     <div className="p-6 space-y-6">

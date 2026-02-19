@@ -43,12 +43,14 @@ export default function FeatureFlagsPage() {
     try {
       const res = await featureFlags.list({ limit: 100 });
       setFlags(res.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleToggle(flag: FeatureFlag) {
     const updated = await featureFlags.update(flag.id, { enabled: !flag.enabled });

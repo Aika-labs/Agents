@@ -42,12 +42,14 @@ export default function SessionDetailPage() {
       ]);
       setSession(s);
       setMessageList(msgs.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [sessionId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   // Auto-scroll to bottom when messages change.
   useEffect(() => {

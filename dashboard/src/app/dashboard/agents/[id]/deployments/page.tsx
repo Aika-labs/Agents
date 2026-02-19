@@ -37,12 +37,14 @@ export default function DeploymentsPage() {
       ]);
       if (list.status === "fulfilled") setDeploymentList(list.value.data);
       if (act.status === "fulfilled") setActive(act.value);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   return (
     <div className="p-6 space-y-6">
