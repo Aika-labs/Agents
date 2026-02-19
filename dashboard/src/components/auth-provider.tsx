@@ -1,13 +1,16 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthContextValue {
+  /** Current user, or a synthetic demo user when Supabase is not configured. */
   user: User | null;
   session: Session | null;
   loading: boolean;
+  /** Whether the app is running without Supabase (demo / preview mode). */
+  demo: boolean;
   signOut: () => Promise<void>;
 }
 
@@ -15,16 +18,34 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   session: null,
   loading: true,
+  demo: false,
   signOut: async () => {},
 });
 
+/** Minimal synthetic user so pages that read `user.email` etc. don't crash. */
+const DEMO_USER = {
+  id: "demo-user",
+  email: "demo@agent-os.local",
+  aud: "authenticated",
+  role: "authenticated",
+  app_metadata: {},
+  user_metadata: { full_name: "Demo User" },
+  created_at: new Date().toISOString(),
+} as unknown as User;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const demo = !isSupabaseConfigured();
+  // In demo mode, initialise with a synthetic user so no effect is needed.
+  const [user, setUser] = useState<User | null>(demo ? DEMO_USER : null);
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!demo);
 
   useEffect(() => {
-    const supabase = createClient();
+    // Nothing to do in demo mode -- state was initialised above.
+    if (demo) return;
+
+    // When demo is false the env vars are present, so createClient() is non-null.
+    const supabase = createClient()!;
 
     // Get initial session.
     supabase.auth.getSession().then(({ data: { session: s } }) => {
@@ -43,17 +64,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [demo]);
 
   const signOut = useCallback(async () => {
+    if (demo) return;
     const supabase = createClient();
-    await supabase.auth.signOut();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
     setUser(null);
     setSession(null);
-  }, []);
+  }, [demo]);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, demo, signOut }}>
       {children}
     </AuthContext.Provider>
   );

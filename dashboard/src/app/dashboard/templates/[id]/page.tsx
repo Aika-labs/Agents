@@ -39,12 +39,14 @@ export default function TemplateDetailPage() {
       ]);
       setTemplate(t);
       setVersions(v.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [templateId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleInstantiate() {
     setInstantiating(true);

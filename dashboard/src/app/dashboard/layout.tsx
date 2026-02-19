@@ -6,14 +6,14 @@ import { AuthProvider, useAuth } from "@/components/auth-provider";
 import { Sidebar } from "@/components/sidebar";
 
 function ProtectedShell({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, demo } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (!loading && !user && !demo) {
       router.replace("/login");
     }
-  }, [user, loading, router]);
+  }, [user, loading, demo, router]);
 
   if (loading) {
     return (
@@ -23,7 +23,7 @@ function ProtectedShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) {
+  if (!user && !demo) {
     return null;
   }
 
@@ -31,6 +31,11 @@ function ProtectedShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
       <main className="flex-1 overflow-y-auto bg-background">
+        {demo && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-sm text-amber-800">
+            Demo mode — no backend connected. Data shown is placeholder.
+          </div>
+        )}
         {children}
       </main>
     </div>

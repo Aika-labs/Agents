@@ -40,12 +40,14 @@ export default function PermissionsPage() {
     try {
       const res = await permissions.list(agentId, { limit: 100 });
       setPermList(res.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleGrant() {
     setGranting(true);

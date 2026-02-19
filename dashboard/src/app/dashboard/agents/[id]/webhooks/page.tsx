@@ -38,12 +38,14 @@ export default function WebhooksPage() {
     try {
       const res = await webhooks.list(agentId, { limit: 50 });
       setWebhookList(res.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleToggle(wh: Webhook) {
     const updated = await webhooks.update(agentId, wh.id, { is_active: !wh.is_active });

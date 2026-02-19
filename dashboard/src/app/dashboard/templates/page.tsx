@@ -36,12 +36,14 @@ export default function TemplatesPage() {
       if (categoryFilter !== "all") params.category = categoryFilter;
       const res = await templates.list(params);
       setTemplateList(res.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [categoryFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   return (
     <div className="p-6 space-y-6">

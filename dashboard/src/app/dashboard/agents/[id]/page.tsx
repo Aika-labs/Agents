@@ -84,12 +84,14 @@ export default function AgentDetailPage() {
       setEditSystemPrompt(a.system_prompt ?? "");
       setEditTags(a.tags.join(", "));
       setModelConfigJson(JSON.stringify(a.model_config, null, 2));
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [agentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleSave() {
     if (!agent) return;

@@ -59,12 +59,14 @@ export default function AgentsPage() {
       if (frameworkFilter !== "all") params.framework = frameworkFilter;
       const res = await agents.list(params);
       setAgentList(res.data);
+    } catch {
+      // API unreachable (demo mode or backend down) -- render empty state.
     } finally {
       setLoading(false);
     }
   }, [statusFilter, frameworkFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleCreate() {
     setCreating(true);
